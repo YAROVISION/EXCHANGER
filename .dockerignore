@@ -1,0 +1,11 @@
+.git
+.github
+.venv
+.specify
+specs
+tests
+__pycache__
+*.pyc
+.env
+.env.*
+*.log
