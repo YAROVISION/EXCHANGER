@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exchanger — Симулятор автоторгівлі криптовалютою</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>☕</text></svg>">
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+</head>
+<body>
+    <!-- Login Overlay -->
+    <div id="login-overlay" class="overlay">
+        <div class="login-card">
+            <h2>☕ EXCHANGER LOGIN</h2>
+            <p class="subtitle">Введіть дані для входу до торгового терміналу</p>
+            <form id="login-form">
+                <div class="input-group">
+                    <label for="email">Email Address</label>
+                    <input type="email" id="email" required placeholder="example@domain.com">
+                </div>
+                <div class="input-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" required placeholder="••••••••">
+                </div>
+                <button type="submit" class="btn btn-primary">УВІЙТИ В ТЕРМІНАЛ</button>
+            </form>
+            <div id="login-error" class="error-msg"></div>
+        </div>
+    </div>
+
+    <!-- Main App Layout -->
+    <div id="app-container" class="app-layout hidden">
+        <!-- Sidebar / Header -->
+        <header class="app-header">
+            <div class="logo">
+                <span class="coffee-icon">☕</span> EXCHANGER <span class="badge">PRO</span>
+            </div>
+            <div class="live-ticker-container">
+                <div class="ticker-item clickable-ticker active" id="btc-ticker" role="button" tabindex="0" data-asset="BTC">
+                    <span class="ticker-symbol">BTC/USDT</span>
+                    <span class="ticker-value">Loading...</span>
+                    <span class="ticker-change">0.00%</span>
+                </div>
+                <div class="ticker-item clickable-ticker" id="eth-ticker" role="button" tabindex="0" data-asset="ETH">
+                    <span class="ticker-symbol">ETH/USDT</span>
+                    <span class="ticker-value">Loading...</span>
+                    <span class="ticker-change">0.00%</span>
+                </div>
+            </div>
+            <div class="user-profile">
+                <span id="user-email-display" class="user-email">yarovision@gmail.com</span>
+                <button id="logout-btn" class="btn-logout">ВИЙТИ</button>
+            </div>
+        </header>
+
+        <!-- Main Workspace -->
+        <main class="workspace">
+            <!-- Left panel: Balances & Stats -->
+            <section class="panel panel-left">
+                <!-- Wallet section -->
+                <div id="wallet-section" class="panel-left-wrapper">
+                    <div class="panel-header">💳 ВІРТУАЛЬНИЙ ГАМАНЕЦЬ</div>
+                    <div class="balance-card">
+                        <div class="balance-item primary">
+                            <span class="label">Доступно USD/USDT</span>
+                            <span class="value" id="usd-balance-display">$0.00</span>
+                        </div>
+                        <div class="balance-grid">
+                            <div class="balance-item">
+                                <span class="label" id="crypto-balance-label">Баланс BTC</span>
+                                <span class="value" id="btc-balance-display">0.00000000 BTC</span>
+                            </div>
+                            <div class="balance-item">
+                                <span class="label">Середня ціна купівлі</span>
+                                <span class="value" id="avg-buy-display">$0.00</span>
+                            </div>
+                        </div>
+                        <!-- Wallet position target levels (FR-010) -->
+                        <div id="wallet-targets-info" class="wallet-targets-card hidden">
+                            <h5>🎯 Орієнтири для продажу:</h5>
+                            <div class="wallet-target-row">
+                                <span class="target-label">Беззбитковість (0%, +0.2%):</span>
+                                <strong class="target-value" id="wallet-breakeven-price">-</strong>
+                            </div>
+                            <div class="wallet-target-row">
+                                <span class="target-label">Мін. прибуток (+0.3%):</span>
+                                <strong class="target-value" id="wallet-minprofit-price">-</strong>
+                            </div>
+                        </div>
+                        <button id="reset-btn" class="btn btn-danger">СКИД БАЛАНСУ</button>
+                    </div>
+                </div>
+
+                <!-- Bot Course Stats section -->
+                <div id="bot-course-stats-section" class="panel-left-wrapper hidden">
+                    <div class="panel-header">📈 СТАТИСТИКА КУРСУ</div>
+                    <div class="bot-stats-card" style="padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; flex: 1;">
+                        <table class="bot-stats-table">
+                            <tr>
+                                <td>Максимум</td>
+                                <td id="metrics-price-max" class="mono-val">$-.--</td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <span>75% Рівень</span>
+                                    <div id="metrics-price-75-diff" class="stat-diff">-</div>
+                                </td>
+                                <td style="text-align: right; vertical-align: middle;">
+                                    <div id="metrics-price-75" class="mono-val">$-.--</div>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>Поточний курс</td>
+                                <td id="metrics-price-current" class="mono-val highlight-current">$-.--</td>
+                            </tr>
+                            <tr>
+                                <td>Середнє значення</td>
+                                <td id="metrics-price-avg" class="mono-val">$-.--</td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <span>25% Рівень</span>
+                                    <div id="metrics-price-25-diff" class="stat-diff">-</div>
+                                </td>
+                                <td style="text-align: right; vertical-align: middle;">
+                                    <div id="metrics-price-25" class="mono-val">$-.--</div>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>Мінімум</td>
+                                <td id="metrics-price-min" class="mono-val">$-.--</td>
+                            </tr>
+                            <tr>
+                                <td>База тіків</td>
+                                <td>
+                                    <input id="metrics-database-size" type="number" min="2" max="100000" value="17280" class="bot-stat-input">
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>Результат (Виграш)</td>
+                                <td style="text-align: right;">
+                                    <div id="metrics-virtual-profit" class="virtual-profit-display">
+                                        $100.00 USD / 0.00000000 BTC
+                                    </div>
+                                    <button id="reset-virtual-profit-btn" class="btn-reset-virtual">Скинути</button>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Middle panel: Trade Operations -->
+            <section class="panel panel-center">
+                <div class="panel-header">📈 ТОРГОВІ ОПЕРАЦІЇ</div>
+                <div class="tabs">
+                    <button class="tab-btn active" data-tab="market">MARKET (Ринкові угоди)</button>
+                    <button class="tab-btn" data-tab="limit">LIMIT (Лімітні ордери)</button>
+                    <button class="tab-btn" data-tab="bot">BOT (Автоторгівля)</button>
+                </div>
+
+                <!-- Market Order Form -->
+                <div id="market-tab" class="tab-content">
+                    <div class="trade-box">
+                        <h3 id="market-trade-title">Купівля / Продаж BTC за ринковою ціною</h3>
+                        <div class="input-group">
+                            <label id="market-amount-label">Кількість для угоди (BTC)</label>
+                            <div class="numeric-input-wrapper">
+                                <input type="number" id="market-amount" step="0.0001" min="0.0001" value="0.01">
+                                <div class="numeric-spinners">
+                                    <button type="button" class="spin-btn spin-up" onclick="adjustValue('market-amount', 1)">▲</button>
+                                    <button type="button" class="spin-btn spin-down" onclick="adjustValue('market-amount', -1)">▼</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="trade-buttons">
+                            <button id="market-buy-btn" class="btn btn-buy">КУПИТИ BTC</button>
+                            <button id="market-sell-btn" class="btn btn-sell">ПРОДАТИ BTC</button>
+                        </div>
+                    </div>
+                    <!-- Target levels info (FR-010) -->
+                    <div id="market-targets-info" class="targets-card">
+                        <h4 id="targets-title">🎯 Орієнтири для продажу (при купівлі зараз):</h4>
+                        <div class="target-row">
+                            <span class="target-label">Беззбитковість (0% прибутку, +0.2%):</span>
+                            <span class="target-value" id="breakeven-price">-</span>
+                        </div>
+                        <div class="target-row">
+                            <span class="target-label">Мінімальний прибуток (+0.3%):</span>
+                            <span class="target-value" id="minprofit-price">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Limit Order Form -->
+                <div id="limit-tab" class="tab-content hidden">
+                    <div class="trade-box">
+                        <h3>Розмістити лімітний ордер</h3>
+                        <div class="input-group">
+                            <label>Лімітна ціна (USDT)</label>
+                            <div class="numeric-input-wrapper">
+                                <input type="number" id="limit-price" step="0.01" min="0.01" placeholder="Введіть цільову ціну">
+                                <div class="numeric-spinners">
+                                    <button type="button" class="spin-btn spin-up" onclick="adjustValue('limit-price', 1)">▲</button>
+                                    <button type="button" class="spin-btn spin-down" onclick="adjustValue('limit-price', -1)">▼</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="input-group">
+                            <label id="limit-amount-label">Кількість (BTC)</label>
+                            <div class="numeric-input-wrapper">
+                                <input type="number" id="limit-amount" step="0.0001" min="0.0001" value="0.01">
+                                <div class="numeric-spinners">
+                                    <button type="button" class="spin-btn spin-up" onclick="adjustValue('limit-amount', 1)">▲</button>
+                                    <button type="button" class="spin-btn spin-down" onclick="adjustValue('limit-amount', -1)">▼</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="trade-buttons">
+                            <button id="limit-buy-btn" class="btn btn-buy-limit">BUY LIMIT</button>
+                            <button id="limit-sell-btn" class="btn btn-sell-limit">SELL LIMIT</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- BOT tab -->
+                <div id="bot-tab" class="tab-content hidden">
+                    <div class="bot-column bot-column-center">
+                        <div id="metrics-history-chart" class="bot-chart-container"></div>
+                        
+                        <!-- Info Panel: 4 Cards -->
+                        <div class="bot-info-grid">
+                            <div class="bot-info-card">
+                                <span class="card-label">Загальний капітал</span>
+                                <div id="bot-total-equity" class="card-value">$100.00</div>
+                            </div>
+                            <div class="bot-info-card">
+                                <span class="card-label">Чистий прибуток</span>
+                                <div id="bot-net-profit" class="card-value">+$0.00 (0.00%)</div>
+                            </div>
+                            <div class="bot-info-card">
+                                <span class="card-label">Середній вхід</span>
+                                <div id="bot-avg-buy-price" class="card-value">$-.--</div>
+                            </div>
+                            <div class="bot-info-card">
+                                <span class="card-label">Нефіксований PnL</span>
+                                <div id="bot-unrealized-pnl" class="card-value">$-.--</div>
+                            </div>
+                        </div>
+
+                        <!-- Window Size Control Row -->
+                        <div class="bot-control-row">
+                            <span class="control-label">Кількість тіків історії для розрахунку:</span>
+                            <input id="metrics-history-size" type="number" min="2" max="10000" value="1500" class="bot-control-input">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Active Orders list -->
+                <div class="orders-section" id="active-orders-section">
+                    <h4>Активні ордери</h4>
+                    <div class="active-orders-list" id="active-orders-container">
+                        <div class="no-data">Немає активних лімітних ордерів</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right panel: History -->
+            <section class="panel panel-right">
+                <!-- Real Trade History (for Market/Limit) -->
+                <div id="real-history-section" class="panel-right-wrapper">
+                    <div class="panel-header">📜 ІСТОРІЯ УГОД</div>
+                    <div class="history-list" id="history-container">
+                        <div class="no-data">Угод ще не здійснено</div>
+                    </div>
+                </div>
+                
+                <!-- Bot Trade History (for Bot tab) -->
+                <div id="bot-history-section" class="panel-right-wrapper hidden">
+                    <div class="panel-header">🤖 УГОДИ БОТА</div>
+                    <div class="history-list" id="bot-history-container">
+                        <div class="no-data">Угод ще не здійснено</div>
+                    </div>
+                </div>
+            </section>
+        </main>
+        
+        <!-- Status Bar -->
+        <footer class="app-status-bar">
+            <span class="status-indicator online"></span>
+            <span class="status-text">Підключено до Binance API (Realtime)</span>
+            <span class="update-timer" id="update-timer">Оновлення через 5с</span>
+        </footer>
+    </div>
+
+    <script src="/static/js/main.js"></script>
+</body>
+</html>

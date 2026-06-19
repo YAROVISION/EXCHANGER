@@ -1,0 +1,39 @@
+# Local environment variables
+.env
+.env.local
+
+# Python virtual environment
+.venv/
+venv/
+ENV/
+env/
+
+# Python cache and compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# IDE files
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# OS generated files
+Thumbs.db
+db.db
+Desktop.ini
+.DS_Store
+
+# Log files
+*.log
+
+# App data storage (dynamic)
+src/data/crypto_ticks.json
+

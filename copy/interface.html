@@ -1,0 +1,182 @@
+<!-- 
+  Kronos Interface Snippets for:
+  - Metrics (Показники)
+  - Analytics of the Last 5 Trades (Аналітика останніх 5 угод)
+  - Exchange Rate Statistics (Статистика курсу (останні 1500 оновлень))
+  - Metrics History Chart Container (Графік історії показників)
+-->
+
+<!-- 1. CSS Styles & Themes (Add this to your stylesheet or <style> tag) -->
+<style>
+    :root {
+        /* Coffee Theme Colors */
+        --coffee-dark: #2C1A11;
+        --coffee-darker: #1C100A;
+        --coffee-espresso: #3D2517;
+        --coffee-light: #D5B99A;
+        --coffee-cream: #EADBC8;
+        --coffee-latte: #F5EBE0;
+        --coffee-accent: #8B5E3C;
+        --coffee-border: #CBB29C;
+
+        /* Text colors */
+        --text-dark: #2C1A11;
+        --text-light: #F5EBE0;
+    }
+
+    /* Grid Layout for Wallet/Metrics Cards */
+    .exchange-wallet-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+    }
+
+    @media (max-width: 480px) {
+        .exchange-wallet-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    /* Card Styling */
+    .exchange-card {
+        background: var(--coffee-cream);
+        border: 1px solid var(--coffee-light);
+        border-radius: 8px;
+        padding: 15px;
+        text-align: center;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+    }
+
+    .exchange-card.full-width {
+        grid-column: 1 / -1;
+    }
+
+    .exchange-card h4 {
+        font-size: 11px;
+        text-transform: uppercase;
+        color: var(--coffee-accent);
+        margin-bottom: 6px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+    }
+
+    .exchange-card .value {
+        font-size: 18px;
+        font-weight: bold;
+        color: var(--coffee-dark);
+    }
+
+    /* Metrics Section Wrapper */
+    .metrics-section {
+        margin-top: 20px;
+        border-top: 1px dashed var(--coffee-light);
+        padding-top: 15px;
+    }
+</style>
+
+<!-- 2. HTML Markup -->
+<div class="metrics-section" id="exchange-metrics-container">
+    <h4 style="margin-top: 0; margin-bottom: 12px; font-size: 14px; font-weight: bold; color: var(--coffee-espresso); display: flex; align-items: center; gap: 6px;">
+        📊 Показники
+    </h4>
+    
+    <!-- 2.1 general Metrics Grid -->
+    <div class="exchange-wallet-grid">
+        <div class="exchange-card">
+            <h4>Загальний капітал</h4>
+            <div id="metrics-total-equity" class="value">$100.00</div>
+        </div>
+        <div class="exchange-card">
+            <h4>Чистий прибуток</h4>
+            <div id="metrics-net-profit" class="value">+$0.00 (0.00%)</div>
+        </div>
+        <div class="exchange-card">
+            <h4>Середній вхід</h4>
+            <div id="metrics-avg-buy-price" class="value">$-.--</div>
+        </div>
+        <div class="exchange-card">
+            <h4>Нефіксований PnL</h4>
+            <div id="metrics-unrealized-pnl" class="value">$-.--</div>
+        </div>
+    </div>
+
+    <!-- 2.2 Trade Analytics Section (Last 5 Deals) -->
+    <div style="margin-top: 15px; border-top: 1px dashed var(--coffee-light); padding-top: 15px;">
+        <h5 style="margin-top: 0; margin-bottom: 12px; font-size: 13px; font-weight: bold; color: var(--coffee-espresso); display: flex; align-items: center; gap: 6px;">
+            💼 Аналітика останніх 5 угод
+        </h5>
+        <div class="exchange-card" style="padding: 15px; text-align: left;">
+            <div id="metrics-trades-analytics-content" style="font-size: 13px; color: var(--coffee-dark); line-height: 1.6;">
+                Завантаження аналітики угод...
+            </div>
+        </div>
+    </div>
+
+    <!-- 2.3 Price History Statistics (Last 1500 Updates by default) -->
+    <div style="margin-top: 15px; border-top: 1px dashed var(--coffee-light); padding-top: 15px;">
+        <h5 style="margin-top: 0; margin-bottom: 12px; font-size: 13px; font-weight: bold; color: var(--coffee-espresso); display: flex; align-items: center; gap: 6px;">
+            📈 Статистика курсу (останні <span id="price-history-count">0</span> оновлень)
+        </h5>
+        <div class="exchange-card" style="padding: 12px 18px; text-align: left;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                <tr style="border-bottom: 1px solid var(--coffee-light);">
+                    <td style="padding: 8px 0; font-weight: 600; color: var(--coffee-accent);">Максимум</td>
+                    <td id="metrics-price-max" style="padding: 8px 0; font-weight: bold; text-align: right; color: var(--coffee-dark); font-family: 'JetBrains Mono', monospace;">$-.--</td>
+                </tr>
+                <tr style="border-bottom: 1px solid var(--coffee-light);">
+                    <td style="padding: 8px 0; font-weight: 600; color: var(--coffee-accent); vertical-align: middle;">75% Рівень</td>
+                    <td style="padding: 8px 0; text-align: right; vertical-align: middle;">
+                        <div id="metrics-price-75" style="font-weight: bold; color: var(--coffee-dark); font-family: 'JetBrains Mono', monospace;">$-.--</div>
+                        <div id="metrics-price-75-diff" style="font-size: 10px; color: var(--coffee-accent); font-weight: normal; margin-top: 2px;">-</div>
+                    </td>
+                </tr>
+                <tr style="border-bottom: 1px solid var(--coffee-light);">
+                    <td style="padding: 8px 0; font-weight: 600; color: var(--coffee-accent);">Поточний курс</td>
+                    <td id="metrics-price-current" style="padding: 8px 0; font-weight: bold; text-align: right; color: #bf360c; font-family: 'JetBrains Mono', monospace;">$-.--</td>
+                </tr>
+                <tr style="border-bottom: 1px solid var(--coffee-light);">
+                    <td style="padding: 8px 0; font-weight: 600; color: var(--coffee-accent);">Середнє значення</td>
+                    <td id="metrics-price-avg" style="padding: 8px 0; font-weight: bold; text-align: right; color: var(--coffee-dark); font-family: 'JetBrains Mono', monospace;">$-.--</td>
+                </tr>
+                <tr style="border-bottom: 1px solid var(--coffee-light);">
+                    <td style="padding: 8px 0; font-weight: 600; color: var(--coffee-accent); vertical-align: middle;">25% Рівень</td>
+                    <td style="padding: 8px 0; text-align: right; vertical-align: middle;">
+                        <div id="metrics-price-25" style="font-weight: bold; color: var(--coffee-dark); font-family: 'JetBrains Mono', monospace;">$-.--</div>
+                        <div id="metrics-price-25-diff" style="font-size: 10px; color: var(--coffee-accent); font-weight: normal; margin-top: 2px;">-</div>
+                    </td>
+                </tr>
+                <tr style="border-bottom: 1px solid var(--coffee-light);">
+                    <td style="padding: 8px 0; font-weight: 600; color: var(--coffee-accent);">Мінімум</td>
+                    <td id="metrics-price-min" style="padding: 8px 0; font-weight: bold; text-align: right; color: var(--coffee-dark); font-family: 'JetBrains Mono', monospace;">$-.--</td>
+                </tr>
+                <tr style="border-bottom: 1px solid var(--coffee-light);">
+                    <td style="padding: 8px 0; font-weight: 600; color: var(--coffee-accent); vertical-align: middle;">База тіків</td>
+                    <td style="padding: 8px 0; text-align: right; vertical-align: middle;">
+                        <input id="metrics-database-size" type="number" min="2" max="100000" value="17280" onchange="handleDatabaseSizeChange(this.value)" style="width: 70px; padding: 3px 6px; text-align: right; border: 1px solid var(--coffee-light); border-radius: 4px; background-color: var(--coffee-latte); color: var(--coffee-dark); font-family: 'JetBrains Mono', monospace; font-weight: bold; font-size: 13px;">
+                    </td>
+                </tr>
+                <tr style="border-bottom: 1px solid var(--coffee-light);">
+                    <td style="padding: 8px 0; font-weight: 600; color: var(--coffee-accent); vertical-align: middle;">Кількість тіків</td>
+                    <td style="padding: 8px 0; text-align: right; vertical-align: middle;">
+                        <input id="metrics-history-size" type="number" min="2" max="10000" value="1500" oninput="handleWindowSizeChange(this.value)" style="width: 70px; padding: 3px 6px; text-align: right; border: 1px solid var(--coffee-light); border-radius: 4px; background-color: var(--coffee-latte); color: var(--coffee-dark); font-family: 'JetBrains Mono', monospace; font-weight: bold; font-size: 13px;">
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px 0; font-weight: 600; color: var(--coffee-accent); vertical-align: middle;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span>Виграш</span>
+                            <button onclick="resetVirtualProfit(event)" onmouseover="this.style.backgroundColor='var(--coffee-dark)';" onmouseout="this.style.backgroundColor='var(--coffee-accent)';" style="margin: 0; padding: 2px 8px; font-size: 10px; background-color: var(--coffee-accent); color: white; border-radius: 4px; border: 1px solid var(--coffee-light); cursor: pointer; font-family: 'JetBrains Mono', monospace; font-weight: bold; width: auto; transition: background-color 0.2s ease;">Скинути</button>
+                        </div>
+                    </td>
+                    <td id="metrics-virtual-profit" style="padding: 8px 0; text-align: right; color: var(--coffee-dark); font-family: 'JetBrains Mono', monospace; vertical-align: middle;">
+                        <div style="font-size: 13px; font-weight: bold; color: var(--coffee-dark);">$100.00 USD / 0.00000000 BTC</div>
+                        <div style="font-size: 10px; color: var(--coffee-accent); font-weight: normal; margin-top: 2px;">Капітал: $100.00 (0.00%)</div>
+                    </td>
+                </tr>
+            </table>
+        </div>
+        
+        <!-- 2.4 Metrics History Chart (Plotly container) -->
+        <div id="metrics-history-chart" style="width: 100%; max-width: 100%; overflow: hidden; height: 300px; margin-top: 15px; background: rgba(255, 255, 255, 0.4); border: 1px solid var(--coffee-light); border-radius: 8px; padding: 5px; margin-bottom: 15px;"></div>
+    </div>
+</div>

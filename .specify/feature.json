@@ -1,0 +1,4 @@
+{
+  "feature_directory": "specs/001-crypto-exchanger-core",
+  "auth": {"provider": "supabase", "allowed_user": "yarovision@gmail.com"}
+}

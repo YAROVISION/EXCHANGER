@@ -1,50 +1,58 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+# Exchanger (Обмінник) Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Crypto Trading Simulation Focus
+The application operates as a real-time cryptocurrency trading simulator. It must reliably fetch current market prices for BTC and ETH from the public Binance API.
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+### II. Single-User Access Gate
+Access is restricted strictly to a single designated user: `yarovision@gmail.com`. 
+- Any authentication flow (using Supabase Auth) must check the authenticated user's email.
+- If the email does not match `yarovision@gmail.com`, the session must be immediately terminated and access denied.
+- Registration/sign-ups for new accounts should be disabled or blocked.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### III. Hard History Limit & Local Caching
+To minimize database writes and ensure system reliability:
+- Live prices must be appended locally every 5 seconds to `src/data/crypto_ticks.json` (capped at 17280 ticks per symbol locally).
+- The local ticks must be uploaded to the Supabase database in a single batch once every hour (3600 seconds).
+- The database maintains a rolling history of exactly 17280 price ticks per active trading pair via a PostgreSQL trigger.
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+### IV. Bootstrapping & Synchronization
+Before starting the live price polling loop on application startup or recovery after shutdown:
+- The system MUST perform a synchronization check with the Supabase database.
+- It must download the latest historical ticks from Supabase if local history is missing or incomplete.
+- It must upload any locally stored ticks that have not yet been synced to Supabase.
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### V. Visual Identity & Design System
+The user interface must convey a premium, cohesive aesthetic utilizing the "Coffee & Espresso" visual scheme:
+- **Dark Coffee / Espresso (Primary/Backgrounds)**:
+  - `--coffee-dark`: `#2C1A11`
+  - `--coffee-darker`: `#1C100A`
+  - `--coffee-espresso`: `#3D2517`
+- **Milky Coffee / Latte / Cream (Surfaces/Secondary)**:
+  - `--coffee-light`: `#D5B99A`
+  - `--coffee-cream`: `#EADBC8`
+  - `--coffee-latte`: `#F5EBE0`
+- **Accent & Borders**:
+  - `--coffee-accent`: `#8B5E3C`
+  - `--coffee-border`: `#CBB29C`
+- **Typography & Layout**:
+  - Font family: `'JetBrains Mono', monospace`
+  - Reset styles (`* { margin: 0; padding: 0; box-sizing: border-box; }`)
+  - Modern, responsive, terminal-like trading interface.
+  - **Mobile Responsiveness Constraints**:
+    - Mobile layout (< 600px breakpoint) must stack columns vertically and disable any fixed screen-height restrictions (e.g. use `height: auto` instead of `100vh` on the main workspace) to support standard finger scrolling.
+    - Tablet layout (600px - 1024px) should dynamically transition elements using flexible layouts.
+    - Touch targets (buttons, inputs, links) must have clear padding and sufficient sizes to prevent accidental taps.
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
-
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
-
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
-
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+## Tech Stack Constraints
+- **Core Database & Auth**: Supabase (PostgreSQL + Supabase GoTrue Auth)
+- **Market Data Feed**: Binance Public API (REST/WebSockets)
+- **Local Cache File**: `src/data/crypto_ticks.json`
+- **UI Platform**: Modern Web standard (HTML5, Vanilla CSS custom properties, JS)
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
+- Any modifications to the data storage limits or allowed user credentials must be updated in this Constitution document first.
+- The UI styles must inherit the CSS custom properties defined in this constitution's Visual Identity section.
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
-
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+**Version**: 1.1.0 | **Ratified**: 2026-06-17 | **Last Amended**: 2026-06-17

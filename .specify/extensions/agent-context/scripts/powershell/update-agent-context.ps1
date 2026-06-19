@@ -73,57 +73,32 @@ if (Get-Command ConvertFrom-Yaml -ErrorAction SilentlyContinue) {
 }
 
 if ($null -eq $Options) {
-    # ConvertFrom-Yaml unavailable or failed; fall back to Python+PyYAML.
-    $pythonCmd = $null
-    foreach ($candidate in @('python3', 'python')) {
-        if (Get-Command $candidate -ErrorAction SilentlyContinue) {
-            # Verify it is Python 3
-            $verOut = & $candidate --version 2>&1
-            if ($verOut -match 'Python 3') {
-                $pythonCmd = $candidate
-                break
+    # Fall back to a lightweight regex-based YAML parser for agent-context-config.yml
+    try {
+        $yamlContent = Get-Content -LiteralPath $ExtConfig
+        $parsed = [System.Collections.Generic.Dictionary[string, object]]::new()
+        $markers = [System.Collections.Generic.Dictionary[string, object]]::new()
+        $inMarkers = $false
+        foreach ($line in $yamlContent) {
+            $trimmed = $line.Trim()
+            if ($trimmed.StartsWith('#') -or $trimmed -eq '') { continue }
+            if ($trimmed -match '^context_file:\s*(.*)$') {
+                $parsed['context_file'] = $Matches[1].Trim("'" + '"')
+            } elseif ($trimmed -match '^context_markers:\s*$') {
+                $inMarkers = $true
+            } elseif ($inMarkers -and $trimmed -match '^start:\s*(.*)$') {
+                $markers['start'] = $Matches[1].Trim("'" + '"')
+            } elseif ($inMarkers -and $trimmed -match '^end:\s*(.*)$') {
+                $markers['end'] = $Matches[1].Trim("'" + '"')
+            } elseif ($trimmed -match '^\S+:') {
+                $inMarkers = $false
             }
         }
-    }
-
-    if ($pythonCmd) {
-        try {
-            $jsonOut = & $pythonCmd -c @'
-import json
-import sys
-try:
-    import yaml
-except ImportError:
-    print(
-        "agent-context: PyYAML is required to parse extension config; cannot update context.",
-        file=sys.stderr,
-    )
-    sys.exit(2)
-
-try:
-    with open(sys.argv[1], "r", encoding="utf-8") as fh:
-        data = yaml.safe_load(fh)
-except Exception as exc:
-    print(
-        f"agent-context: unable to parse {sys.argv[1]} ({exc}); cannot update context.",
-        file=sys.stderr,
-    )
-    sys.exit(2)
-
-if not isinstance(data, dict):
-    data = {}
-
-print(json.dumps(data))
-'@ $ExtConfig
-            if ($LASTEXITCODE -eq 0 -and $jsonOut) {
-                $Options = $jsonOut | ConvertFrom-Json -ErrorAction Stop
-            }
-        } catch {
-            $Options = $null
+        if ($markers.Count -gt 0) {
+            $parsed['context_markers'] = $markers
         }
-    }
-
-    if (-not $Options) {
+        $Options = $parsed
+    } catch {
         Write-Warning "agent-context: unable to parse $ExtConfig; skipping update."
         exit 0
     }
