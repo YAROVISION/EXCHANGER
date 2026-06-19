@@ -1,0 +1,24 @@
+version: "3.8"
+
+services:
+  exchanger:
+    image: ghcr.io/yarovision/exchanger:latest
+    container_name: exchanger
+    env_file:
+      - .env
+    volumes:
+      - /docker/exchanger/data:/app/src/data
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik_default
+      - traefik.http.routers.exchanger.rule=Host(`exchanger.lexis.blog`)
+      - traefik.http.routers.exchanger.entrypoints=websecure
+      - traefik.http.routers.exchanger.tls.certresolver=letsencrypt
+      - traefik.http.services.exchanger.loadbalancer.server.port=5000
+    networks:
+      - traefik_default
+
+networks:
+  traefik_default:
+    external: true

@@ -34,6 +34,10 @@ if SUPABASE_URL and SUPABASE_KEY and "your-project-id" not in SUPABASE_URL:
 else:
     print("[WARNING] Supabase credentials not configured or default. Auth and DB features will be unavailable.")
 
+# Sync configuration
+TICK_SYNC_WRITE_ENABLED = os.environ.get("TICK_SYNC_WRITE_ENABLED", "false").lower() == "true"
+print(f"[INFO] TICK_SYNC_WRITE_ENABLED = {TICK_SYNC_WRITE_ENABLED}")
+
 # File path for local ticks accumulation
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 TICKS_FILE = os.path.join(DATA_DIR, "crypto_ticks.json")
@@ -133,9 +137,12 @@ def sync_with_supabase():
                 json.dump(local_ticks, f, indent=2)
                 
         if to_upload:
-            print(f"[INFO] Uploading {len(to_upload)} unsynced local ticks to Supabase...")
-            for i in range(0, len(to_upload), 500):
-                supabase.table("crypto_ticks").insert(to_upload[i:i+500]).execute()
+            if TICK_SYNC_WRITE_ENABLED:
+                print(f"[INFO] Uploading {len(to_upload)} unsynced local ticks to Supabase...")
+                for i in range(0, len(to_upload), 500):
+                    supabase.table("crypto_ticks").insert(to_upload[i:i+500]).execute()
+            else:
+                print(f"[INFO] TICK_SYNC_WRITE_ENABLED is false. Skipping upload of {len(to_upload)} unsynced ticks to Supabase.")
                 
         print("[OK] Startup sync complete.")
     except Exception as e:
@@ -174,8 +181,9 @@ def fetch_binance_prices_loop():
             with state_lock:
                 local_ticks.append(new_btc)
                 local_ticks.append(new_eth)
-                unsynced_ticks.append(new_btc)
-                unsynced_ticks.append(new_eth)
+                if TICK_SYNC_WRITE_ENABLED:
+                    unsynced_ticks.append(new_btc)
+                    unsynced_ticks.append(new_eth)
                 
                 # Keep local history capped at 17280 per symbol
                 btc_list = [t for t in local_ticks if t["symbol"] == "BTCUSDT"][-17280:]
@@ -193,7 +201,7 @@ def fetch_binance_prices_loop():
             loop_count += 1
             if loop_count >= 720:
                 loop_count = 0
-                if supabase and unsynced_ticks:
+                if supabase and unsynced_ticks and TICK_SYNC_WRITE_ENABLED:
                     try:
                         print(f"[INFO] Hourly Sync: Uploading {len(unsynced_ticks)} ticks to Supabase...")
                         with state_lock:
