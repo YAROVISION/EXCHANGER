@@ -1,4 +1,4 @@
-name: Build and Deploy to Hostinger
+name: Build and Push Image
 
 on:
   push:
@@ -49,46 +49,3 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-
-  deploy:
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set image name to lowercase
-        run: |
-          echo "IMAGE_NAME=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-
-      - name: Copy docker-compose.yml via SSH/SCP
-        uses: appleboy/scp-action@master
-        with:
-          host: ${{ secrets.HOSTINGER_SSH_HOST }}
-          username: ${{ secrets.HOSTINGER_SSH_USER }}
-          key: ${{ secrets.HOSTINGER_SSH_KEY }}
-          port: ${{ secrets.HOSTINGER_SSH_PORT || 22 }}
-          source: "docker-compose.yml"
-          target: "/docker/exchanger/"
-
-      - name: Deploy to Hostinger via SSH
-        uses: appleboy/ssh-action@master
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_ACTOR: ${{ github.actor }}
-        with:
-          host: ${{ secrets.HOSTINGER_SSH_HOST }}
-          username: ${{ secrets.HOSTINGER_SSH_USER }}
-          key: ${{ secrets.HOSTINGER_SSH_KEY }}
-          port: ${{ secrets.HOSTINGER_SSH_PORT || 22 }}
-          envs: GITHUB_TOKEN,GITHUB_ACTOR
-          script: |
-            mkdir -p /docker/exchanger
-            cd /docker/exchanger
-            # Log in to GitHub Container Registry on VPS
-            echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-            # Pull latest images and restart container
-            docker compose pull
-            docker compose up -d
-            # Clean up unused Docker images
-            docker image prune -f
