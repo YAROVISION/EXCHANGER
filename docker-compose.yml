@@ -9,11 +9,10 @@ services:
       - .env
     volumes:
       - ./:/app
+      - /app/.venv  # Анонімний том для ізоляції віртуального оточення контейнера від хоста
       - exchanger_data:/app/src/data
     restart: unless-stopped
-    # Використовуємо інсталяцію залежностей через uv у системний Python контейнера.
-    # Це запобігає конфліктам із Windows-папкою `.venv`, якщо вона випадково змонтується з хоста.
-    command: sh -c "pip install --no-cache-dir uv && uv pip install --system -r requirements.txt && python src/app.py"
+    command: sh -c "pip install --no-cache-dir uv && uv sync && uv run python src/app.py"
     labels:
       - traefik.enable=true
       - traefik.docker.network=traefik_default
