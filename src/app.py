@@ -151,8 +151,636 @@ def sync_with_supabase():
 # Run startup sync immediately before starting server threads
 sync_with_supabase()
 
+LIMIT_ORDERS_FILE = os.path.join(DATA_DIR, "limit_orders.json")
+BOT_STATE_FILE = os.path.join(DATA_DIR, "bot_state.json")
+LOCAL_WALLET_FILE = os.path.join(DATA_DIR, "local_wallet.json")
+BOT_WINDOW_SIZES_FILE = os.path.join(DATA_DIR, "bot_window_sizes.json")
+
+def load_local_wallet(user_id):
+    if os.path.exists(LOCAL_WALLET_FILE):
+        try:
+            with open(LOCAL_WALLET_FILE, 'r', encoding='utf-8') as f:
+                wallets = json.load(f)
+                if user_id in wallets:
+                    return wallets[user_id]
+        except Exception as e:
+            print(f"Error reading local_wallet.json: {e}")
+    return {
+        'usd_balance': 100.0,
+        'btc_balance': 0.0,
+        'eth_balance': 0.0,
+        'avg_buy_price': 0.0,
+        'eth_avg_buy_price': 0.0
+    }
+
+def save_local_wallet(user_id, wallet_data):
+    wallets = {}
+    if os.path.exists(LOCAL_WALLET_FILE):
+        try:
+            with open(LOCAL_WALLET_FILE, 'r', encoding='utf-8') as f:
+                wallets = json.load(f)
+        except Exception:
+            pass
+    clean_wallet = {
+        'usd_balance': float(wallet_data.get('usd_balance', 100.0)),
+        'btc_balance': float(wallet_data.get('btc_balance', 0.0)),
+        'eth_balance': float(wallet_data.get('eth_balance', 0.0)),
+        'avg_buy_price': float(wallet_data.get('avg_buy_price', 0.0)),
+        'eth_avg_buy_price': float(wallet_data.get('eth_avg_buy_price', 0.0))
+    }
+    wallets[user_id] = clean_wallet
+    try:
+        with open(LOCAL_WALLET_FILE, 'w', encoding='utf-8') as f:
+            json.dump(wallets, f, indent=2)
+    except Exception as e:
+        print(f"Error writing local_wallet.json: {e}")
+
+def get_user_wallet(user_id):
+    if supabase and not session.get('use_session_fallback'):
+        try:
+            res = supabase.table('wallets').select('*').eq('user_id', user_id).execute()
+            data = getattr(res, 'data', [])
+            if data:
+                return data[0]
+            else:
+                new_wallet = {
+                    'user_id': user_id,
+                    'usd_balance': 100.0,
+                    'btc_balance': 0.0,
+                    'eth_balance': 0.0,
+                    'avg_buy_price': 0.0,
+                    'eth_avg_buy_price': 0.0
+                }
+                supabase.table('wallets').insert(new_wallet).execute()
+                return new_wallet
+        except Exception as e:
+            print(f"Supabase wallet fetch failed, using local fallback: {e}")
+            session['use_session_fallback'] = True
+            session.modified = True
+    return load_local_wallet(user_id)
+
+def save_user_wallet(user_id, wallet_data):
+    if supabase and not session.get('use_session_fallback'):
+        try:
+            update_data = {
+                'usd_balance': float(wallet_data['usd_balance']),
+                'btc_balance': float(wallet_data['btc_balance']),
+                'eth_balance': float(wallet_data['eth_balance']),
+                'avg_buy_price': float(wallet_data['avg_buy_price']),
+                'eth_avg_buy_price': float(wallet_data['eth_avg_buy_price']),
+                'updated_at': datetime.datetime.now().isoformat()
+            }
+            supabase.table('wallets').update(update_data).eq('user_id', user_id).execute()
+            return True
+        except Exception as e:
+            print(f"Supabase wallet update failed, using local fallback: {e}")
+            session['use_session_fallback'] = True
+            session.modified = True
+    save_local_wallet(user_id, wallet_data)
+    return True
+
+def bg_get_user_wallet(user_id):
+    if supabase:
+        try:
+            res = supabase.table('wallets').select('*').eq('user_id', user_id).execute()
+            data = getattr(res, 'data', [])
+            if data:
+                return data[0]
+        except Exception as e:
+            print(f"Background wallet fetch from Supabase failed: {e}")
+    return load_local_wallet(user_id)
+
+def bg_save_user_wallet(user_id, wallet_data):
+    if supabase:
+        try:
+            update_data = {
+                'usd_balance': float(wallet_data['usd_balance']),
+                'btc_balance': float(wallet_data['btc_balance']),
+                'eth_balance': float(wallet_data['eth_balance']),
+                'avg_buy_price': float(wallet_data['avg_buy_price']),
+                'eth_avg_buy_price': float(wallet_data['eth_avg_buy_price']),
+                'updated_at': datetime.datetime.now().isoformat()
+            }
+            supabase.table('wallets').update(update_data).eq('user_id', user_id).execute()
+            return True
+        except Exception as e:
+            print(f"Background wallet update to Supabase failed: {e}")
+    save_local_wallet(user_id, wallet_data)
+    return True
+
+def get_active_limit_orders_for_user(user_id):
+    if supabase and not session.get('use_session_fallback'):
+        try:
+            res = supabase.table('limit_orders').select('*').eq('user_id', user_id).eq('active', True).execute()
+            return getattr(res, 'data', [])
+        except Exception as e:
+            print(f"Error fetching active limit orders from Supabase: {e}")
+    orders = []
+    if os.path.exists(LIMIT_ORDERS_FILE):
+        try:
+            with open(LIMIT_ORDERS_FILE, 'r', encoding='utf-8') as f:
+                orders = json.load(f)
+        except Exception as e:
+            print(f"Error reading limit_orders.json: {e}")
+    return [o for o in orders if o.get('user_id') == user_id and o.get('active', True)]
+
+def map_orders_to_keys(orders_list):
+    res = {
+        'active_limit_order': None,
+        'active_sell_limit_order': None,
+        'active_limit_order_eth': None,
+        'active_sell_limit_order_eth': None
+    }
+    for o in orders_list:
+        symbol = o.get('symbol')
+        type_ = o.get('type')
+        if symbol == 'BTCUSDT':
+            if type_ == 'buy':
+                res['active_limit_order'] = o
+            elif type_ == 'sell':
+                res['active_sell_limit_order'] = o
+        elif symbol == 'ETHUSDT':
+            if type_ == 'buy':
+                res['active_limit_order_eth'] = o
+            elif type_ == 'sell':
+                res['active_sell_limit_order_eth'] = o
+    return res
+
+def add_limit_order_to_db(order_data):
+    if supabase and not session.get('use_session_fallback'):
+        try:
+            supabase.table('limit_orders').insert(order_data).execute()
+            return True
+        except Exception as e:
+            print(f"Error saving limit order to Supabase: {e}")
+    orders = []
+    if os.path.exists(LIMIT_ORDERS_FILE):
+        try:
+            with open(LIMIT_ORDERS_FILE, 'r', encoding='utf-8') as f:
+                orders = json.load(f)
+        except Exception:
+            pass
+    orders.append(order_data)
+    try:
+        with open(LIMIT_ORDERS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(orders, f, indent=2)
+    except Exception as e:
+        print(f"Error writing limit_orders.json: {e}")
+    return True
+
+def cancel_limit_order_in_db(user_id, symbol, type_):
+    if supabase and not session.get('use_session_fallback'):
+        try:
+            supabase.table('limit_orders').update({'active': False}).eq('user_id', user_id).eq('symbol', symbol).eq('type', type_).eq('active', True).execute()
+            return True
+        except Exception as e:
+            print(f"Error canceling limit order in Supabase: {e}")
+    orders = []
+    if os.path.exists(LIMIT_ORDERS_FILE):
+        try:
+            with open(LIMIT_ORDERS_FILE, 'r', encoding='utf-8') as f:
+                orders = json.load(f)
+        except Exception:
+            pass
+    for o in orders:
+        if o.get('user_id') == user_id and o.get('symbol') == symbol and o.get('type') == type_ and o.get('active', True):
+            o['active'] = False
+    try:
+        with open(LIMIT_ORDERS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(orders, f, indent=2)
+    except Exception as e:
+        print(f"Error writing limit_orders.json: {e}")
+    return True
+
+def load_local_trades(user_id):
+    LOCAL_TRADES_FILE = os.path.join(DATA_DIR, "local_trades.json")
+    if os.path.exists(LOCAL_TRADES_FILE):
+        try:
+            with open(LOCAL_TRADES_FILE, 'r', encoding='utf-8') as f:
+                trades = json.load(f)
+                return [t for t in trades if t.get('user_id') == user_id]
+        except Exception as e:
+            print(f"Error reading local_trades.json: {e}")
+    return []
+
+def bg_insert_trade(user_id, trade_log):
+    if supabase:
+        try:
+            supabase.table('trades').insert(trade_log).execute()
+            return True
+        except Exception as e:
+            print(f"Background trade log insert to Supabase failed: {e}")
+    LOCAL_TRADES_FILE = os.path.join(DATA_DIR, "local_trades.json")
+    trades = []
+    if os.path.exists(LOCAL_TRADES_FILE):
+        try:
+            with open(LOCAL_TRADES_FILE, 'r', encoding='utf-8') as f:
+                trades = json.load(f)
+        except Exception:
+            pass
+    trade_log['id'] = len(trades) + 1
+    trades.insert(0, trade_log)
+    try:
+        with open(LOCAL_TRADES_FILE, 'w', encoding='utf-8') as f:
+            json.dump(trades, f, indent=2)
+    except Exception as e:
+        print(f"Error saving local trades file: {e}")
+    return True
+
+def bg_check_limit_orders(user_id, btc_price, eth_price):
+    active_orders = []
+    if supabase:
+        try:
+            res = supabase.table('limit_orders').select('*').eq('user_id', user_id).eq('active', True).execute()
+            active_orders = getattr(res, 'data', [])
+        except Exception as e:
+            print(f"Error fetching active limit orders from Supabase in background: {e}")
+    else:
+        if os.path.exists(LIMIT_ORDERS_FILE):
+            try:
+                with open(LIMIT_ORDERS_FILE, 'r', encoding='utf-8') as f:
+                    all_orders = json.load(f)
+                    active_orders = [o for o in all_orders if o.get('user_id') == user_id and o.get('active', True)]
+            except Exception:
+                pass
+    if not active_orders:
+        return False
+    triggered_any = False
+    for order in active_orders:
+        symbol = order.get('symbol')
+        price_limit = float(order.get('price'))
+        btc_amount = float(order.get('btc_amount'))
+        fee = float(order.get('fee'))
+        usd_amount = float(order.get('usd_amount'))
+        order_type = order.get('type')
+        order_id = order.get('id')
+        current_price = btc_price if symbol == 'BTCUSDT' else eth_price
+        if current_price <= 0:
+            continue
+        triggered = False
+        if order_type == 'buy' and current_price <= price_limit:
+            triggered = True
+        elif order_type == 'sell' and current_price >= price_limit:
+            triggered = True
+        if triggered:
+            wallet = bg_get_user_wallet(user_id)
+            usd_balance = float(wallet['usd_balance'])
+            btc_balance = float(wallet.get('btc_balance', 0.0))
+            eth_balance = float(wallet.get('eth_balance', 0.0))
+            avg_buy_price = float(wallet.get('avg_buy_price', 0.0))
+            eth_avg_buy_price = float(wallet.get('eth_avg_buy_price', 0.0))
+            new_usd = usd_balance
+            new_btc = btc_balance
+            new_eth = eth_balance
+            new_btc_avg = avg_buy_price
+            new_eth_avg = eth_avg_buy_price
+            if order_type == 'buy':
+                if symbol == 'BTCUSDT':
+                    new_btc = round(btc_balance + btc_amount, 8)
+                    new_btc_avg = ((btc_balance * avg_buy_price) + (btc_amount * price_limit)) / new_btc if new_btc > 0 else 0.0
+                else:
+                    new_eth = round(eth_balance + btc_amount, 8)
+                    new_eth_avg = ((eth_balance * eth_avg_buy_price) + (btc_amount * price_limit)) / new_eth if new_eth > 0 else 0.0
+            else:
+                new_usd = usd_balance + (usd_amount - fee)
+                if symbol == 'BTCUSDT':
+                    new_btc_avg = avg_buy_price if new_btc > 0 else 0.0
+                else:
+                    new_eth_avg = eth_avg_buy_price if new_eth > 0 else 0.0
+            updated_wallet = {
+                'usd_balance': new_usd,
+                'btc_balance': new_btc,
+                'eth_balance': new_eth,
+                'avg_buy_price': new_btc_avg,
+                'eth_avg_buy_price': new_eth_avg
+            }
+            bg_save_user_wallet(user_id, updated_wallet)
+            if supabase:
+                try:
+                    supabase.table('limit_orders').update({'active': False}).eq('id', order_id).execute()
+                except Exception as e:
+                    print(f"Error marking order as executed in Supabase: {e}")
+            else:
+                if os.path.exists(LIMIT_ORDERS_FILE):
+                    try:
+                        with open(LIMIT_ORDERS_FILE, 'r', encoding='utf-8') as f:
+                            all_orders = json.load(f)
+                        for o in all_orders:
+                            if o.get('id') == order_id:
+                                o['active'] = False
+                        with open(LIMIT_ORDERS_FILE, 'w', encoding='utf-8') as f:
+                            json.dump(all_orders, f, indent=2)
+                    except Exception:
+                        pass
+            trade_log = {
+                'user_id': user_id,
+                'type': order_type,
+                'symbol': symbol,
+                'btc_amount': btc_amount,
+                'price': price_limit,
+                'fee': fee,
+                'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+            }
+            bg_insert_trade(user_id, trade_log)
+            triggered_any = True
+    return triggered_any
+
+def get_bot_window_size(user_id, symbol):
+    if os.path.exists(BOT_WINDOW_SIZES_FILE):
+        try:
+            with open(BOT_WINDOW_SIZES_FILE, 'r', encoding='utf-8') as f:
+                sizes = json.load(f)
+                key = f"{user_id}_{symbol}"
+                return sizes.get(key, 1500)
+        except Exception:
+            pass
+    return 1500
+
+def save_bot_window_size(user_id, symbol, size):
+    sizes = {}
+    if os.path.exists(BOT_WINDOW_SIZES_FILE):
+        try:
+            with open(BOT_WINDOW_SIZES_FILE, 'r', encoding='utf-8') as f:
+                sizes = json.load(f)
+        except Exception:
+            pass
+    key = f"{user_id}_{symbol}"
+    sizes[key] = int(size)
+    try:
+        with open(BOT_WINDOW_SIZES_FILE, 'w', encoding='utf-8') as f:
+            json.dump(sizes, f, indent=2)
+    except Exception as e:
+        print(f"Error saving bot window size: {e}")
+
+def bg_get_bot_state(user_id, symbol):
+    if supabase:
+        try:
+            res = supabase.table('bot_states').select('*').eq('user_id', user_id).eq('symbol', symbol).execute()
+            data = getattr(res, 'data', [])
+            if data:
+                return data[0]
+            else:
+                initial_state = {
+                    'user_id': user_id,
+                    'symbol': symbol,
+                    'usd_balance': 100.0,
+                    'asset_balance': 0.0,
+                    'trade_state': 'idle',
+                    'trade_sub_state': 'waiting_75',
+                    'buy_price': 0.0
+                }
+                supabase.table('bot_states').insert(initial_state).execute()
+                return initial_state
+        except Exception as e:
+            print(f"Error fetching bot state from Supabase: {e}")
+    if os.path.exists(BOT_STATE_FILE):
+        try:
+            with open(BOT_STATE_FILE, 'r', encoding='utf-8') as f:
+                bot_states = json.load(f)
+                key = f"{user_id}_{symbol}"
+                if key in bot_states:
+                    return bot_states[key]
+        except Exception as e:
+            print(f"Error reading bot_state.json: {e}")
+    return {
+        'user_id': user_id,
+        'symbol': symbol,
+        'usd_balance': 100.0,
+        'asset_balance': 0.0,
+        'trade_state': 'idle',
+        'trade_sub_state': 'waiting_75',
+        'buy_price': 0.0
+    }
+
+def bg_save_bot_state(user_id, symbol, state_data):
+    if supabase:
+        try:
+            update_data = {
+                'usd_balance': float(state_data['usd_balance']),
+                'asset_balance': float(state_data['asset_balance']),
+                'trade_state': state_data['trade_state'],
+                'trade_sub_state': state_data['trade_sub_state'],
+                'buy_price': float(state_data['buy_price']),
+                'updated_at': datetime.datetime.now().isoformat()
+            }
+            supabase.table('bot_states').upsert({
+                'user_id': user_id,
+                'symbol': symbol,
+                **update_data
+            }, on_conflict='user_id,symbol').execute()
+            return True
+        except Exception as e:
+            print(f"Error saving bot state to Supabase: {e}")
+    bot_states = {}
+    if os.path.exists(BOT_STATE_FILE):
+        try:
+            with open(BOT_STATE_FILE, 'r', encoding='utf-8') as f:
+                bot_states = json.load(f)
+        except Exception:
+            pass
+    key = f"{user_id}_{symbol}"
+    bot_states[key] = {
+        'user_id': user_id,
+        'symbol': symbol,
+        'usd_balance': float(state_data['usd_balance']),
+        'asset_balance': float(state_data['asset_balance']),
+        'trade_state': state_data['trade_state'],
+        'trade_sub_state': state_data['trade_sub_state'],
+        'buy_price': float(state_data['buy_price'])
+    }
+    try:
+        with open(BOT_STATE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(bot_states, f, indent=2)
+    except Exception as e:
+        print(f"Error writing bot_state.json: {e}")
+    return True
+
+def bg_get_bot_trades(user_id, symbol):
+    if supabase:
+        try:
+            res = supabase.table('bot_trades').select('*').eq('user_id', user_id).eq('symbol', symbol).order('timestamp', desc=True).execute()
+            return getattr(res, 'data', [])
+        except Exception as e:
+            print(f"Error fetching bot trades from Supabase: {e}")
+    BOT_TRADES_FILE = os.path.join(DATA_DIR, "bot_trades.json")
+    if os.path.exists(BOT_TRADES_FILE):
+        try:
+            with open(BOT_TRADES_FILE, 'r', encoding='utf-8') as f:
+                trades = json.load(f)
+                return [t for t in trades if t.get('user_id') == user_id and t.get('symbol') == symbol]
+        except Exception as e:
+            print(f"Error reading bot_trades.json: {e}")
+    return []
+
+def bg_insert_bot_trade(user_id, symbol, trade_log):
+    if supabase:
+        try:
+            supabase.table('bot_trades').insert({
+                'user_id': user_id,
+                'symbol': symbol,
+                'type': trade_log['type'],
+                'amount': float(trade_log['amount']),
+                'price': float(trade_log['price']),
+                'fee': float(trade_log['fee']),
+                'total': float(trade_log['total']),
+                'timestamp': trade_log.get('timestamp', datetime.datetime.now().isoformat())
+            }).execute()
+            return True
+        except Exception as e:
+            print(f"Error inserting bot trade to Supabase: {e}")
+    BOT_TRADES_FILE = os.path.join(DATA_DIR, "bot_trades.json")
+    trades = []
+    if os.path.exists(BOT_TRADES_FILE):
+        try:
+            with open(BOT_TRADES_FILE, 'r', encoding='utf-8') as f:
+                trades = json.load(f)
+        except Exception:
+            pass
+    trade_log['id'] = len(trades) + 1
+    trade_log['user_id'] = user_id
+    trade_log['symbol'] = symbol
+    trades.insert(0, trade_log)
+    try:
+        with open(BOT_TRADES_FILE, 'w', encoding='utf-8') as f:
+            json.dump(trades, f, indent=2)
+    except Exception as e:
+        print(f"Error writing bot_trades.json: {e}")
+    return True
+
+def bg_clear_bot_trades(user_id, symbol):
+    if supabase:
+        try:
+            supabase.table('bot_trades').delete().eq('user_id', user_id).eq('symbol', symbol).execute()
+            return True
+        except Exception as e:
+            print(f"Error clearing bot trades in Supabase: {e}")
+    BOT_TRADES_FILE = os.path.join(DATA_DIR, "bot_trades.json")
+    if os.path.exists(BOT_TRADES_FILE):
+        try:
+            with open(BOT_TRADES_FILE, 'r', encoding='utf-8') as f:
+                trades = json.load(f)
+            filtered = [t for t in trades if not (t.get('user_id') == user_id and t.get('symbol') == symbol)]
+            with open(BOT_TRADES_FILE, 'w', encoding='utf-8') as f:
+                json.dump(filtered, f, indent=2)
+        except Exception as e:
+            print(f"Error clearing local bot trades: {e}")
+    return True
+
+def get_all_active_users():
+    if supabase:
+        try:
+            res = supabase.table('wallets').select('user_id').execute()
+            data = getattr(res, 'data', [])
+            return list(set(d['user_id'] for d in data if 'user_id' in d))
+        except Exception as e:
+            print(f"Error fetching active users from Supabase: {e}")
+    users = []
+    if os.path.exists(LOCAL_WALLET_FILE):
+        try:
+            with open(LOCAL_WALLET_FILE, 'r', encoding='utf-8') as f:
+                wallets = json.load(f)
+                users = list(wallets.keys())
+        except Exception:
+            pass
+    if not users:
+        users = ['2bea02ac-19b7-4614-adb6-0d1cf8403277']
+    return users
+
+def run_bot_trading_strategy_on_server(user_id, symbol, current_price, ticks_list, window_size=1500):
+    if len(ticks_list) < 2 or len(ticks_list) < window_size:
+        return
+    window_ticks = ticks_list[-window_size:]
+    max_price = max(window_ticks)
+    min_price = min(window_ticks)
+    if max_price <= min_price:
+        return
+    diff = max_price - min_price
+    val75 = min_price + 0.75 * diff
+    val25 = min_price + 0.25 * diff
+    s = bg_get_bot_state(user_id, symbol)
+    fee_rate = 0.001
+    usd = float(s['usd_balance'])
+    asset = float(s['asset_balance'])
+    trade_state = s['trade_state']
+    trade_sub_state = s['trade_sub_state']
+    buy_price = float(s['buy_price'])
+    state_changed = False
+    if trade_state == 'idle':
+        if current_price <= val25:
+            if usd > 0:
+                total_cost = usd
+                asset = total_cost / (current_price * (1.0 + fee_rate))
+                fee = asset * current_price * fee_rate
+                usd = 0.0
+                trade_state = 'holding'
+                trade_sub_state = 'waiting_75'
+                buy_price = current_price
+                state_changed = True
+                trade_log = {
+                    'type': 'buy',
+                    'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+                    'amount': asset,
+                    'price': current_price,
+                    'fee': fee,
+                    'total': total_cost
+                }
+                bg_insert_bot_trade(user_id, symbol, trade_log)
+    elif trade_state == 'holding':
+        if trade_sub_state == 'waiting_75':
+            if current_price >= val75:
+                if asset > 0:
+                    estimated_revenue = asset * current_price * (1.0 - fee_rate)
+                    cost_of_purchase = asset * buy_price * (1.0 + fee_rate)
+                    if estimated_revenue > cost_of_purchase:
+                        usd = estimated_revenue
+                        fee = asset * current_price * fee_rate
+                        trade_log = {
+                            'type': 'sell',
+                            'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+                            'amount': asset,
+                            'price': current_price,
+                            'fee': fee,
+                            'total': estimated_revenue
+                        }
+                        bg_insert_bot_trade(user_id, symbol, trade_log)
+                        asset = 0.0
+                        trade_state = 'idle'
+                        trade_sub_state = 'waiting_75'
+                        buy_price = 0.0
+                        state_changed = True
+                    else:
+                        trade_sub_state = 'waiting_breakeven'
+                        state_changed = True
+        elif trade_sub_state == 'waiting_breakeven':
+            if current_price >= buy_price * 1.003:
+                if asset > 0:
+                    estimated_revenue = asset * current_price * (1.0 - fee_rate)
+                    usd = estimated_revenue
+                    fee = asset * current_price * fee_rate
+                    trade_log = {
+                        'type': 'sell',
+                        'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+                        'amount': asset,
+                        'price': current_price,
+                        'fee': fee,
+                        'total': estimated_revenue
+                    }
+                    bg_insert_bot_trade(user_id, symbol, trade_log)
+                    asset = 0.0
+                    trade_state = 'idle'
+                    trade_sub_state = 'waiting_75'
+                    buy_price = 0.0
+                    state_changed = True
+    if state_changed:
+        s['usd_balance'] = usd
+        s['asset_balance'] = asset
+        s['trade_state'] = trade_state
+        s['trade_sub_state'] = trade_sub_state
+        s['buy_price'] = buy_price
+        bg_save_bot_state(user_id, symbol, s)
+
 def fetch_binance_prices_loop():
-    """Background loop to fetch prices every 5s, save locally, and sync to Supabase hourly"""
+    """Background loop to fetch prices every 5s, save locally, run bot strategy & check limit orders, and sync to Supabase hourly"""
     loop_count = 0
     global local_ticks, unsynced_ticks
     while True:
@@ -160,6 +788,7 @@ def fetch_binance_prices_loop():
             # 1. Fetch BTC price
             btc_url = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
             req = urllib.request.Request(btc_url, headers={'User-Agent': 'Mozilla/5.0'})
+            btc_price = 0.0
             with urllib.request.urlopen(req) as response:
                 data = json.loads(response.read().decode())
                 btc_price = float(data['price'])
@@ -168,6 +797,7 @@ def fetch_binance_prices_loop():
             # 2. Fetch ETH price
             eth_url = "https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT"
             req = urllib.request.Request(eth_url, headers={'User-Agent': 'Mozilla/5.0'})
+            eth_price = 0.0
             with urllib.request.urlopen(req) as response:
                 data = json.loads(response.read().decode())
                 eth_price = float(data['price'])
@@ -197,6 +827,33 @@ def fetch_binance_prices_loop():
                 except Exception as file_err:
                     print(f"Error saving local ticks: {file_err}")
 
+            # 2.5 Run Background checks for Limit Orders & Bot Trading Strategies for all active users
+            if btc_price > 0 and eth_price > 0:
+                active_users = get_all_active_users()
+                with state_lock:
+                    btc_history = [float(t['price']) for t in local_ticks if t["symbol"] == "BTCUSDT"]
+                    eth_history = [float(t['price']) for t in local_ticks if t["symbol"] == "ETHUSDT"]
+                
+                for user_id in active_users:
+                    # A. Check and execute limit orders
+                    try:
+                        bg_check_limit_orders(user_id, btc_price, eth_price)
+                    except Exception as limit_err:
+                        print(f"[ERROR] Background limit order execution failed for {user_id}: {limit_err}")
+                        
+                    # B. Evaluate bot autotrading strategy
+                    try:
+                        btc_window = get_bot_window_size(user_id, 'BTCUSDT')
+                        run_bot_trading_strategy_on_server(user_id, 'BTCUSDT', btc_price, btc_history, btc_window)
+                    except Exception as bot_err:
+                        print(f"[ERROR] Background BTC bot strategy failed for {user_id}: {bot_err}")
+                        
+                    try:
+                        eth_window = get_bot_window_size(user_id, 'ETHUSDT')
+                        run_bot_trading_strategy_on_server(user_id, 'ETHUSDT', eth_price, eth_history, eth_window)
+                    except Exception as bot_err:
+                        print(f"[ERROR] Background ETH bot strategy failed for {user_id}: {bot_err}")
+
             # 3. Check hourly sync (5s * 720 = 3600s = 1 hour)
             loop_count += 1
             if loop_count >= 720:
@@ -219,7 +876,7 @@ def fetch_binance_prices_loop():
 
         except Exception as e:
             print(f"Error in price loader thread: {e}")
- 
+  
         time.sleep(5)
  
 # Start background pricing thread
@@ -296,6 +953,8 @@ def auth_login():
             session['user_id'] = user.id
             session['user_email'] = user.email
             session['access_token'] = sess.access_token
+            session['use_session_fallback'] = False
+            session.modified = True
             return jsonify({
                 'message': 'Login successful!',
                 'user': {
@@ -306,18 +965,8 @@ def auth_login():
         else:
             raise Exception("Invalid credentials from Supabase")
     except Exception as e:
-        print(f"[INFO] Supabase auth failed ({e}), using mock/local session fallback.")
-        session['user_id'] = 'mock-user-id-for-testing'
-        session['user_email'] = 'yarovision@gmail.com'
-        session['use_session_fallback'] = True
-        session.modified = True
-        return jsonify({
-            'message': 'Login successful (local fallback)!',
-            'user': {
-                'id': 'mock-user-id-for-testing',
-                'email': 'yarovision@gmail.com'
-            }
-        }), 200
+        print(f"[INFO] Supabase auth failed ({e})")
+        return jsonify({'error': 'Неправильний пароль або помилка авторизації'}), 401
 
 @app.route('/api/auth/logout', methods=['POST'])
 def auth_logout():
@@ -343,7 +992,7 @@ def auth_status():
 
 @app.route('/api/auth/mock-login-test', methods=['GET'])
 def mock_login_test():
-    session['user_id'] = 'mock-user-id-for-testing'
+    session['user_id'] = '2bea02ac-19b7-4614-adb6-0d1cf8403277'
     session['user_email'] = 'yarovision@gmail.com'
     session.modified = True
     return jsonify({'message': 'Logged in successfully as yarovision@gmail.com!'}), 200
@@ -373,10 +1022,8 @@ def check_wallet_invariants(wallet):
 @login_required
 def exchange_wallet():
     user_id = session.get('user_id')
-    limit_order = session.get('limit_order')
-    sell_limit_order = session.get('sell_limit_order')
-    limit_order_eth = session.get('limit_order_eth')
-    sell_limit_order_eth = session.get('sell_limit_order_eth')
+    active_orders = get_active_limit_orders_for_user(user_id)
+    mapped_orders = map_orders_to_keys(active_orders)
     
     # 1. Try Supabase
     if supabase and not session.get('use_session_fallback'):
@@ -385,7 +1032,6 @@ def exchange_wallet():
             data = getattr(res, 'data', [])
             if data:
                 wallet = data[0]
-                # Force fallback if the schema hasn't been migrated
                 has_eth = 'eth_balance' in wallet
                 has_symbol = True
                 if has_eth:
@@ -413,10 +1059,7 @@ def exchange_wallet():
                         'eth_balance': float(wallet.get('eth_balance', 0.0)),
                         'avg_buy_price': float(wallet.get('avg_buy_price', 0.0)),
                         'eth_avg_buy_price': float(wallet.get('eth_avg_buy_price', 0.0)),
-                        'active_limit_order': limit_order,
-                        'active_sell_limit_order': sell_limit_order,
-                        'active_limit_order_eth': limit_order_eth,
-                        'active_sell_limit_order_eth': sell_limit_order_eth
+                        **mapped_orders
                     }), 200
             else:
                 new_wallet = {
@@ -434,31 +1077,19 @@ def exchange_wallet():
                     'eth_balance': 0.0,
                     'avg_buy_price': 0.0,
                     'eth_avg_buy_price': 0.0,
-                    'active_limit_order': limit_order,
-                    'active_sell_limit_order': sell_limit_order,
-                    'active_limit_order_eth': limit_order_eth,
-                    'active_sell_limit_order_eth': sell_limit_order_eth
+                    **mapped_orders
                 }), 200
         except Exception as e:
             print(f"Error fetching wallet from Supabase: {str(e)}")
             session['use_session_fallback'] = True
             session.modified = True
             
-    # 2. Fallback to Flask session
-    if 'wallet' not in session:
-        session['wallet'] = {
-            'usd_balance': 100.0,
-            'btc_balance': 0.0,
-            'eth_balance': 0.0,
-            'avg_buy_price': 0.0,
-            'eth_avg_buy_price': 0.0
-        }
-    wallet_data = dict(session['wallet'])
-    wallet_data['active_limit_order'] = limit_order
-    wallet_data['active_sell_limit_order'] = sell_limit_order
-    wallet_data['active_limit_order_eth'] = limit_order_eth
-    wallet_data['active_sell_limit_order_eth'] = sell_limit_order_eth
-    return jsonify(wallet_data), 200
+    # 2. Fallback to local persistent wallet
+    wallet_data = load_local_wallet(user_id)
+    return jsonify({
+        **wallet_data,
+        **mapped_orders
+    }), 200
 
 @app.route('/api/exchange/history', methods=['GET'])
 @login_required
@@ -475,10 +1106,8 @@ def exchange_history():
             session['use_session_fallback'] = True
             session.modified = True
             
-    # Fallback to session
-    if 'trades' not in session:
-        session['trades'] = []
-    return jsonify(session['trades']), 200
+    # Fallback to local persistent trades
+    return jsonify(load_local_trades(user_id)), 200
 
 @app.route('/api/exchange/trade', methods=['POST'])
 @login_required
@@ -503,165 +1132,14 @@ def exchange_trade():
         return jsonify({'error': 'Amount and price must be greater than zero'}), 400
 
     fee_rate = 0.001  # 0.1% fee
-    
-    # 1. Process via Supabase
-    if supabase and not session.get('use_session_fallback'):
-        try:
-            res = supabase.table('wallets').select('*').eq('user_id', user_id).execute()
-            wallets_data = getattr(res, 'data', [])
-            if not wallets_data:
-                return jsonify({'error': 'Wallet not found'}), 404
-            
-            wallet = wallets_data[0]
-            usd_balance = float(wallet['usd_balance'])
-            
-            fee = btc_amount * price * fee_rate
-            total_usd_value = btc_amount * price
-            
-            update_data = {
-                'updated_at': datetime.datetime.now().isoformat()
-            }
-            
-            if symbol == 'BTCUSDT':
-                btc_balance = float(wallet.get('btc_balance', 0.0))
-                avg_buy_price = float(wallet.get('avg_buy_price', 0.0))
-                
-                if trade_type == 'buy':
-                    total_cost = total_usd_value + fee
-                    if usd_balance < total_cost:
-                        return jsonify({'error': 'Недостатньо USD для купівлі'}), 400
-                        
-                    new_usd_balance = usd_balance - total_cost
-                    new_btc_balance = round(btc_balance + btc_amount, 8)
-                    new_avg_buy_price = ((btc_balance * avg_buy_price) + (btc_amount * price)) / new_btc_balance if new_btc_balance > 0 else 0.0
-                    
-                    update_data.update({
-                        'usd_balance': new_usd_balance,
-                        'btc_balance': new_btc_balance,
-                        'avg_buy_price': new_avg_buy_price
-                    })
-                elif trade_type == 'sell':
-                    if round(btc_balance, 8) < round(btc_amount, 8):
-                        return jsonify({'error': 'Недостатньо BTC для продажу'}), 400
-                        
-                    new_usd_balance = usd_balance + (total_usd_value - fee)
-                    new_btc_balance = round(btc_balance - btc_amount, 8)
-                    new_avg_buy_price = avg_buy_price if new_btc_balance > 0 else 0.0
-                    
-                    update_data.update({
-                        'usd_balance': new_usd_balance,
-                        'btc_balance': new_btc_balance,
-                        'avg_buy_price': new_avg_buy_price
-                    })
-                else:
-                    return jsonify({'error': 'Invalid trade type'}), 400
-            elif symbol == 'ETHUSDT':
-                eth_balance = float(wallet.get('eth_balance', 0.0))
-                eth_avg_buy_price = float(wallet.get('eth_avg_buy_price', 0.0))
-                
-                if trade_type == 'buy':
-                    total_cost = total_usd_value + fee
-                    if usd_balance < total_cost:
-                        return jsonify({'error': 'Недостатньо USD для купівлі'}), 400
-                        
-                    new_usd_balance = usd_balance - total_cost
-                    new_eth_balance = round(eth_balance + btc_amount, 8)
-                    new_avg_buy_price = ((eth_balance * eth_avg_buy_price) + (btc_amount * price)) / new_eth_balance if new_eth_balance > 0 else 0.0
-                    
-                    update_data.update({
-                        'usd_balance': new_usd_balance,
-                        'eth_balance': new_eth_balance,
-                        'eth_avg_buy_price': new_avg_buy_price
-                    })
-                elif trade_type == 'sell':
-                    if round(eth_balance, 8) < round(btc_amount, 8):
-                        return jsonify({'error': 'Недостатньо ETH для продажу'}), 400
-                        
-                    new_usd_balance = usd_balance + (total_usd_value - fee)
-                    new_eth_balance = round(eth_balance - btc_amount, 8)
-                    new_avg_buy_price = eth_avg_buy_price if new_eth_balance > 0 else 0.0
-                    
-                    update_data.update({
-                        'usd_balance': new_usd_balance,
-                        'eth_balance': new_eth_balance,
-                        'eth_avg_buy_price': new_avg_buy_price
-                    })
-                else:
-                    return jsonify({'error': 'Invalid trade type'}), 400
-            else:
-                return jsonify({'error': 'Unsupported symbol'}), 400
-                
-            supabase.table('wallets').update(update_data).eq('user_id', user_id).execute()
-            
-            trade_log = {
-                'user_id': user_id,
-                'type': trade_type,
-                'symbol': symbol,
-                'btc_amount': btc_amount,
-                'price': price,
-                'fee': fee,
-                'timestamp': datetime.datetime.now().isoformat()
-            }
-            supabase.table('trades').insert(trade_log).execute()
-            
-            wallet_state = {
-                'usd_balance': update_data['usd_balance'],
-                'btc_balance': update_data.get('btc_balance', float(wallet.get('btc_balance', 0.0))),
-                'eth_balance': update_data.get('eth_balance', float(wallet.get('eth_balance', 0.0))),
-                'avg_buy_price': update_data.get('avg_buy_price', float(wallet.get('avg_buy_price', 0.0))),
-                'eth_avg_buy_price': update_data.get('eth_avg_buy_price', float(wallet.get('eth_avg_buy_price', 0.0)))
-            }
-            check_wallet_invariants(wallet_state)
-            
-            return jsonify({
-                'usd_balance': wallet_state['usd_balance'],
-                'btc_balance': wallet_state['btc_balance'],
-                'eth_balance': wallet_state['eth_balance'],
-                'avg_buy_price': wallet_state['avg_buy_price'],
-                'eth_avg_buy_price': wallet_state['eth_avg_buy_price'],
-                'message': 'Угоду успішно виконано!'
-            }), 200
-            
-        except Exception as e:
-            print(f"Supabase trade failed, forcing session fallback: {str(e)}")
-            session['use_session_fallback'] = True
-            
-            # Construct updated wallet values from variables calculated during trade
-            target_usd = new_usd_balance if 'new_usd_balance' in locals() else usd_balance
-            target_btc = new_btc_balance if 'new_btc_balance' in locals() else btc_balance
-            target_eth = new_eth_balance if 'new_eth_balance' in locals() else eth_balance
-            
-            target_btc_avg = new_avg_buy_price if ('new_avg_buy_price' in locals() and symbol == 'BTCUSDT') else avg_buy_price
-            target_eth_avg = new_avg_buy_price if ('new_avg_buy_price' in locals() and symbol == 'ETHUSDT') else eth_avg_buy_price
-            
-            session['wallet'] = {
-                'usd_balance': target_usd,
-                'btc_balance': target_btc,
-                'eth_balance': target_eth,
-                'avg_buy_price': target_btc_avg,
-                'eth_avg_buy_price': target_eth_avg
-            }
-            session.modified = True
-
-    # 2. Fallback to Flask session
-    if 'wallet' not in session:
-        session['wallet'] = {
-            'usd_balance': 100.0,
-            'btc_balance': 0.0,
-            'eth_balance': 0.0,
-            'avg_buy_price': 0.0,
-            'eth_avg_buy_price': 0.0
-        }
-    if 'trades' not in session:
-        session['trades'] = []
-        
-    wallet = session['wallet']
-    usd_balance = float(wallet['usd_balance'])
-    
     fee = btc_amount * price * fee_rate
     total_usd_value = btc_amount * price
     
-    new_wallet = dict(wallet)
+    # Load wallet
+    wallet = get_user_wallet(user_id)
+    usd_balance = float(wallet['usd_balance'])
+    
+    updated_wallet = dict(wallet)
     
     if symbol == 'BTCUSDT':
         btc_balance = float(wallet.get('btc_balance', 0.0))
@@ -676,7 +1154,7 @@ def exchange_trade():
             new_btc_balance = round(btc_balance + btc_amount, 8)
             new_avg_buy_price = ((btc_balance * avg_buy_price) + (btc_amount * price)) / new_btc_balance if new_btc_balance > 0 else 0.0
             
-            new_wallet.update({
+            updated_wallet.update({
                 'usd_balance': new_usd_balance,
                 'btc_balance': new_btc_balance,
                 'avg_buy_price': new_avg_buy_price
@@ -689,11 +1167,13 @@ def exchange_trade():
             new_btc_balance = round(btc_balance - btc_amount, 8)
             new_avg_buy_price = avg_buy_price if new_btc_balance > 0 else 0.0
             
-            new_wallet.update({
+            updated_wallet.update({
                 'usd_balance': new_usd_balance,
                 'btc_balance': new_btc_balance,
                 'avg_buy_price': new_avg_buy_price
             })
+        else:
+            return jsonify({'error': 'Invalid trade type'}), 400
     elif symbol == 'ETHUSDT':
         eth_balance = float(wallet.get('eth_balance', 0.0))
         eth_avg_buy_price = float(wallet.get('eth_avg_buy_price', 0.0))
@@ -707,7 +1187,7 @@ def exchange_trade():
             new_eth_balance = round(eth_balance + btc_amount, 8)
             new_avg_buy_price = ((eth_balance * eth_avg_buy_price) + (btc_amount * price)) / new_eth_balance if new_eth_balance > 0 else 0.0
             
-            new_wallet.update({
+            updated_wallet.update({
                 'usd_balance': new_usd_balance,
                 'eth_balance': new_eth_balance,
                 'eth_avg_buy_price': new_avg_buy_price
@@ -720,38 +1200,40 @@ def exchange_trade():
             new_eth_balance = round(eth_balance - btc_amount, 8)
             new_avg_buy_price = eth_avg_buy_price if new_eth_balance > 0 else 0.0
             
-            new_wallet.update({
+            updated_wallet.update({
                 'usd_balance': new_usd_balance,
                 'eth_balance': new_eth_balance,
                 'eth_avg_buy_price': new_avg_buy_price
             })
+        else:
+            return jsonify({'error': 'Invalid trade type'}), 400
     else:
         return jsonify({'error': 'Unsupported symbol'}), 400
-        
-    session['wallet'] = new_wallet
+
+    # Save wallet
+    save_user_wallet(user_id, updated_wallet)
     
+    # Save trade history
     trade_log = {
-        'id': len(session['trades']) + 1,
         'user_id': user_id,
         'type': trade_type,
         'symbol': symbol,
         'btc_amount': btc_amount,
         'price': price,
         'fee': fee,
-        'timestamp': datetime.datetime.now().isoformat()
+        'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
     }
-    session['trades'].insert(0, trade_log)
-    session.modified = True
+    bg_insert_trade(user_id, trade_log)
     
-    check_wallet_invariants(new_wallet)
+    check_wallet_invariants(updated_wallet)
     
     return jsonify({
-        'usd_balance': new_wallet['usd_balance'],
-        'btc_balance': new_wallet.get('btc_balance', 0.0),
-        'eth_balance': new_wallet.get('eth_balance', 0.0),
-        'avg_buy_price': new_wallet.get('avg_buy_price', 0.0),
-        'eth_avg_buy_price': new_wallet.get('eth_avg_buy_price', 0.0),
-        'message': 'Угоду успішно виконано! (Збережено в сесії)'
+        'usd_balance': updated_wallet['usd_balance'],
+        'btc_balance': updated_wallet.get('btc_balance', 0.0),
+        'eth_balance': updated_wallet.get('eth_balance', 0.0),
+        'avg_buy_price': updated_wallet.get('avg_buy_price', 0.0),
+        'eth_avg_buy_price': updated_wallet.get('eth_avg_buy_price', 0.0),
+        'message': 'Угоду успішно виконано!'
     }), 200
 
 @app.route('/api/exchange/reset', methods=['POST'])
@@ -759,6 +1241,26 @@ def exchange_trade():
 def exchange_reset():
     user_id = session.get('user_id')
     
+    # Deactivate active limit orders
+    if supabase and not session.get('use_session_fallback'):
+        try:
+            supabase.table('limit_orders').update({'active': False}).eq('user_id', user_id).execute()
+        except Exception as e:
+            print(f"Error resetting limit orders in Supabase: {e}")
+    else:
+        if os.path.exists(LIMIT_ORDERS_FILE):
+            try:
+                with open(LIMIT_ORDERS_FILE, 'r', encoding='utf-8') as f:
+                    all_orders = json.load(f)
+                for o in all_orders:
+                    if o.get('user_id') == user_id:
+                        o['active'] = False
+                with open(LIMIT_ORDERS_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(all_orders, f, indent=2)
+            except Exception:
+                pass
+
+    # Reset main wallet balance and trades
     if supabase and not session.get('use_session_fallback'):
         try:
             supabase.table('wallets').update({
@@ -771,12 +1273,6 @@ def exchange_reset():
             }).eq('user_id', user_id).execute()
             
             supabase.table('trades').delete().eq('user_id', user_id).execute()
-            
-            session['limit_order'] = None
-            session['sell_limit_order'] = None
-            session['limit_order_eth'] = None
-            session['sell_limit_order_eth'] = None
-            session.modified = True
             
             return jsonify({
                 'usd_balance': 100.0,
@@ -793,19 +1289,27 @@ def exchange_reset():
         except Exception as e:
             print(f"Supabase reset failed: {str(e)}")
             
-    session['wallet'] = {
+    # Reset local persistent fallback
+    reset_wallet = {
         'usd_balance': 100.0,
         'btc_balance': 0.0,
         'eth_balance': 0.0,
         'avg_buy_price': 0.0,
         'eth_avg_buy_price': 0.0
     }
-    session['trades'] = []
-    session['limit_order'] = None
-    session['sell_limit_order'] = None
-    session['limit_order_eth'] = None
-    session['sell_limit_order_eth'] = None
-    session.modified = True
+    save_local_wallet(user_id, reset_wallet)
+    
+    LOCAL_TRADES_FILE = os.path.join(DATA_DIR, "local_trades.json")
+    if os.path.exists(LOCAL_TRADES_FILE):
+        try:
+            with open(LOCAL_TRADES_FILE, 'r', encoding='utf-8') as f:
+                trades = json.load(f)
+            filtered = [t for t in trades if t.get('user_id') != user_id]
+            with open(LOCAL_TRADES_FILE, 'w', encoding='utf-8') as f:
+                json.dump(filtered, f, indent=2)
+        except Exception:
+            pass
+
     return jsonify({
         'usd_balance': 100.0,
         'btc_balance': 0.0,
@@ -816,7 +1320,7 @@ def exchange_reset():
         'active_sell_limit_order': None,
         'active_limit_order_eth': None,
         'active_sell_limit_order_eth': None,
-        'message': 'Баланс успішно скинуто! (Очищено в сесії)'
+        'message': 'Баланс успішно скинуто! (Очищено в локальному кеші)'
     }), 200
 
 @app.route('/api/exchange/limit-order', methods=['POST'])
@@ -847,33 +1351,24 @@ def place_limit_order():
     fee = btc_amount * price * fee_rate
 
     # Load current wallet state
-    wallet = None
-    if supabase and not session.get('use_session_fallback'):
-        try:
-            res = supabase.table('wallets').select('*').eq('user_id', user_id).execute()
-            data = getattr(res, 'data', [])
-            if data:
-                wallet = data[0]
-        except Exception as e:
-            print(f"Error fetching wallet for limit: {e}")
-            session['use_session_fallback'] = True
-            session.modified = True
-
-    if not wallet:
-        if 'wallet' not in session:
-            session['wallet'] = {
-                'usd_balance': 100.0,
-                'btc_balance': 0.0,
-                'eth_balance': 0.0,
-                'avg_buy_price': 0.0,
-                'eth_avg_buy_price': 0.0
-            }
-        wallet = session['wallet']
-
+    wallet = get_user_wallet(user_id)
     usd_balance = float(wallet['usd_balance'])
     btc_balance = float(wallet.get('btc_balance', 0.0))
     eth_balance = float(wallet.get('eth_balance', 0.0))
     
+    # Check if there is already an active order of this type/symbol
+    active_orders = get_active_limit_orders_for_user(user_id)
+    mapped_orders = map_orders_to_keys(active_orders)
+    
+    existing_key = None
+    if symbol == 'BTCUSDT':
+        existing_key = 'active_limit_order' if order_type == 'buy' else 'active_sell_limit_order'
+    else:
+        existing_key = 'active_limit_order_eth' if order_type == 'buy' else 'active_sell_limit_order_eth'
+        
+    if mapped_orders[existing_key] is not None:
+        return jsonify({'error': f'Вже існує активний ордер на {order_type} для {symbol}'}), 400
+
     # Verify and perform balance updates
     if order_type == 'buy':
         total_cost = usd_amount + fee
@@ -896,58 +1391,38 @@ def place_limit_order():
             new_btc = btc_balance
         new_usd = usd_balance
 
-    # Write back updates
-    if supabase and not session.get('use_session_fallback'):
-        try:
-            update_data = {
-                'usd_balance': new_usd,
-                'btc_balance': new_btc,
-                'eth_balance': new_eth,
-                'updated_at': datetime.datetime.now().isoformat()
-            }
-            supabase.table('wallets').update(update_data).eq('user_id', user_id).execute()
-        except Exception as e:
-            print(f"Supabase limit lock write failed, falling back to session: {e}")
-            session['use_session_fallback'] = True
-            session.modified = True
-
-    # Save to session (both for fallback and session-state)
-    session['wallet'] = {
+    # Write back updates to wallet
+    updated_wallet = {
         'usd_balance': new_usd,
         'btc_balance': new_btc,
         'eth_balance': new_eth,
         'avg_buy_price': float(wallet.get('avg_buy_price', 0.0)),
         'eth_avg_buy_price': float(wallet.get('eth_avg_buy_price', 0.0))
     }
+    save_user_wallet(user_id, updated_wallet)
 
+    # Insert limit order
+    import uuid
     order_data = {
-        'active': True,
-        'type': order_type,
+        'id': str(uuid.uuid4()),
+        'user_id': user_id,
         'symbol': symbol,
-        'usd_amount': usd_amount,
+        'type': order_type,
         'btc_amount': btc_amount,
         'price': price,
         'fee': fee,
-        'total_cost': usd_amount + fee if order_type == 'buy' else 0.0
+        'usd_amount': usd_amount,
+        'active': True,
+        'created_at': datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
     }
-    
-    if symbol == 'BTCUSDT':
-        if order_type == 'buy':
-            session['limit_order'] = order_data
-        else:
-            session['sell_limit_order'] = order_data
-    else:
-        if order_type == 'buy':
-            session['limit_order_eth'] = order_data
-        else:
-            session['sell_limit_order_eth'] = order_data
+    add_limit_order_to_db(order_data)
 
-    session.modified = True
+    # Get updated list of active limit orders to return
+    updated_active_orders = get_active_limit_orders_for_user(user_id)
+    mapped_updated = map_orders_to_keys(updated_active_orders)
+
     return jsonify({
-        'active_limit_order': session.get('limit_order'),
-        'active_sell_limit_order': session.get('sell_limit_order'),
-        'active_limit_order_eth': session.get('limit_order_eth'),
-        'active_sell_limit_order_eth': session.get('sell_limit_order_eth'),
+        **mapped_updated,
         'message': 'Лімітний ордер успішно розміщено!'
     }), 200
 
@@ -959,307 +1434,131 @@ def cancel_limit_order():
     order_type = data.get('type', 'buy')
     symbol = data.get('symbol', 'BTCUSDT')
 
-    # Load order from session
-    if order_type == 'buy':
-        order = session.get('limit_order') if symbol == 'BTCUSDT' else session.get('limit_order_eth')
+    # Load active orders
+    active_orders = get_active_limit_orders_for_user(user_id)
+    mapped_orders = map_orders_to_keys(active_orders)
+    
+    existing_key = None
+    if symbol == 'BTCUSDT':
+        existing_key = 'active_limit_order' if order_type == 'buy' else 'active_sell_limit_order'
     else:
-        order = session.get('sell_limit_order') if symbol == 'BTCUSDT' else session.get('sell_limit_order_eth')
+        existing_key = 'active_limit_order_eth' if order_type == 'buy' else 'active_sell_limit_order_eth'
+        
+    order = mapped_orders[existing_key]
 
-    if not order or not order.get('active'):
+    if not order:
         return jsonify({'error': f'Немає активних лімітних ордерів на {order_type} для {symbol}'}), 400
 
     # Load current wallet state
-    wallet = None
-    if supabase and not session.get('use_session_fallback'):
-        try:
-            res = supabase.table('wallets').select('*').eq('user_id', user_id).execute()
-            data = getattr(res, 'data', [])
-            if data:
-                wallet = data[0]
-        except Exception as e:
-            print(f"Error fetching wallet for cancel: {e}")
-            session['use_session_fallback'] = True
-            session.modified = True
-
-    if not wallet:
-        if 'wallet' not in session:
-            session['wallet'] = {
-                'usd_balance': 100.0,
-                'btc_balance': 0.0,
-                'eth_balance': 0.0,
-                'avg_buy_price': 0.0,
-                'eth_avg_buy_price': 0.0
-            }
-        wallet = session['wallet']
-
+    wallet = get_user_wallet(user_id)
     usd_balance = float(wallet['usd_balance'])
     btc_balance = float(wallet.get('btc_balance', 0.0))
     eth_balance = float(wallet.get('eth_balance', 0.0))
 
     if order_type == 'buy':
-        new_usd = usd_balance + order['total_cost']
+        new_usd = usd_balance + float(order['usd_amount']) + float(order['fee'])
         new_btc = btc_balance
         new_eth = eth_balance
     else:
         new_usd = usd_balance
         if symbol == 'BTCUSDT':
-            new_btc = round(btc_balance + order['btc_amount'], 8)
+            new_btc = round(btc_balance + float(order['btc_amount']), 8)
             new_eth = eth_balance
         else:
-            new_eth = round(eth_balance + order['btc_amount'], 8)
+            new_eth = round(eth_balance + float(order['btc_amount']), 8)
             new_btc = btc_balance
 
-    # Write back updates
-    if supabase and not session.get('use_session_fallback'):
-        try:
-            update_data = {
-                'usd_balance': new_usd,
-                'btc_balance': new_btc,
-                'eth_balance': new_eth,
-                'updated_at': datetime.datetime.now().isoformat()
-            }
-            supabase.table('wallets').update(update_data).eq('user_id', user_id).execute()
-        except Exception as e:
-            print(f"Supabase refund write failed, falling back to session: {e}")
-            session['use_session_fallback'] = True
-            session.modified = True
-
-    # Save to session (both for fallback and session-state)
-    session['wallet'] = {
+    # Save wallet
+    updated_wallet = {
         'usd_balance': new_usd,
         'btc_balance': new_btc,
         'eth_balance': new_eth,
         'avg_buy_price': float(wallet.get('avg_buy_price', 0.0)),
         'eth_avg_buy_price': float(wallet.get('eth_avg_buy_price', 0.0))
     }
+    save_user_wallet(user_id, updated_wallet)
 
-    # Remove active order
-    if symbol == 'BTCUSDT':
-        if order_type == 'buy':
-            session['limit_order'] = None
-        else:
-            session['sell_limit_order'] = None
-    else:
-        if order_type == 'buy':
-            session['limit_order_eth'] = None
-        else:
-            session['sell_limit_order_eth'] = None
+    # Deactivate the order
+    cancel_limit_order_in_db(user_id, symbol, order_type)
 
-    session.modified = True
     return jsonify({'message': 'Ордер успішно скасовано, кошти повернуто.'}), 200
 
 @app.route('/api/exchange/limit-order/check', methods=['POST'])
 @login_required
 def check_limit_order():
     user_id = session.get('user_id')
-    
-    # Fetch all limit orders from session
-    limit_order_btc = session.get('limit_order')
-    sell_limit_order_btc = session.get('sell_limit_order')
-    limit_order_eth = session.get('limit_order_eth')
-    sell_limit_order_eth = session.get('sell_limit_order_eth')
-
     btc_price = latest_prices.get("BTC", 0.0)
     eth_price = latest_prices.get("ETH", 0.0)
-
-    triggered_msg = []
-    session_modified = False
-
-    # Helper function to execute trigger
-    def trigger_buy(order, symbol, limit_price):
-        btc_amount = float(order['btc_amount'])
-        fee = float(order['fee'])
-        if supabase and not session.get('use_session_fallback'):
-            try:
-                res = supabase.table('wallets').select('*').eq('user_id', user_id).execute()
-                wallets_data = getattr(res, 'data', [])
-                if wallets_data:
-                    wallet = wallets_data[0]
-                    update_data = {}
-                    if symbol == 'BTCUSDT':
-                        btc_balance = float(wallet.get('btc_balance', 0.0))
-                        avg_buy_price = float(wallet.get('avg_buy_price', 0.0))
-                        new_btc = round(btc_balance + btc_amount, 8)
-                        new_avg = ((btc_balance * avg_buy_price) + (btc_amount * limit_price)) / new_btc if new_btc > 0 else 0.0
-                        update_data = {
-                            'btc_balance': new_btc,
-                            'avg_buy_price': new_avg
-                        }
-                    else:
-                        eth_balance = float(wallet.get('eth_balance', 0.0))
-                        eth_avg_buy_price = float(wallet.get('eth_avg_buy_price', 0.0))
-                        new_eth = round(eth_balance + btc_amount, 8)
-                        new_avg = ((eth_balance * eth_avg_buy_price) + (btc_amount * limit_price)) / new_eth if new_eth > 0 else 0.0
-                        update_data = {
-                            'eth_balance': new_eth,
-                            'eth_avg_buy_price': new_avg
-                        }
-                    
-                    supabase.table('wallets').update(update_data).eq('user_id', user_id).execute()
-
-                    supabase.table('trades').insert({
-                        'user_id': user_id,
-                        'type': 'buy',
-                        'symbol': symbol,
-                        'btc_amount': btc_amount,
-                        'price': limit_price,
-                        'fee': fee
-                    }).execute()
-            except Exception as e:
-                print(f"Trigger buy execution failed for {symbol}: {e}")
-        else:
-            if 'wallet' not in session:
-                session['wallet'] = {
-                    'usd_balance': 100.0,
-                    'btc_balance': 0.0,
-                    'eth_balance': 0.0,
-                    'avg_buy_price': 0.0,
-                    'eth_avg_buy_price': 0.0
-                }
-            wallet = session['wallet']
-            new_wallet = dict(wallet)
-            if symbol == 'BTCUSDT':
-                btc_balance = float(wallet.get('btc_balance', 0.0))
-                avg_buy_price = float(wallet.get('avg_buy_price', 0.0))
-                new_btc = round(btc_balance + btc_amount, 8)
-                new_avg = ((btc_balance * avg_buy_price) + (btc_amount * limit_price)) / new_btc if new_btc > 0 else 0.0
-                new_wallet.update({
-                    'btc_balance': new_btc,
-                    'avg_buy_price': new_avg
-                })
-            else:
-                eth_balance = float(wallet.get('eth_balance', 0.0))
-                eth_avg_buy_price = float(wallet.get('eth_avg_buy_price', 0.0))
-                new_eth = round(eth_balance + btc_amount, 8)
-                new_avg = ((eth_balance * eth_avg_buy_price) + (btc_amount * limit_price)) / new_eth if new_eth > 0 else 0.0
-                new_wallet.update({
-                    'eth_balance': new_eth,
-                    'eth_avg_buy_price': new_avg
-                })
-            session['wallet'] = new_wallet
-            if 'trades' not in session:
-                session['trades'] = []
-            session['trades'].insert(0, {
-                'id': len(session['trades']) + 1,
-                'user_id': user_id,
-                'type': 'buy',
-                'symbol': symbol,
-                'btc_amount': btc_amount,
-                'price': limit_price,
-                'fee': fee,
-                'timestamp': datetime.datetime.now().isoformat()
-            })
-
-    def trigger_sell(order, symbol, limit_price):
-        btc_amount = float(order['btc_amount'])
-        usd_amount = float(order['usd_amount'])
-        fee = float(order['fee'])
-        if supabase and not session.get('use_session_fallback'):
-            try:
-                res = supabase.table('wallets').select('*').eq('user_id', user_id).execute()
-                wallets_data = getattr(res, 'data', [])
-                if wallets_data:
-                    wallet = wallets_data[0]
-                    usd_balance = float(wallet['usd_balance'])
-                    new_usd = usd_balance + (usd_amount - fee)
-                    
-                    update_data = {
-                        'usd_balance': new_usd
-                    }
-                    if symbol == 'BTCUSDT':
-                        btc_balance = float(wallet.get('btc_balance', 0.0))
-                        new_avg = float(wallet.get('avg_buy_price', 0.0)) if btc_balance > 0 else 0.0
-                        update_data['avg_buy_price'] = new_avg
-                    else:
-                        eth_balance = float(wallet.get('eth_balance', 0.0))
-                        new_avg = float(wallet.get('eth_avg_buy_price', 0.0)) if eth_balance > 0 else 0.0
-                        update_data['eth_avg_buy_price'] = new_avg
-                    
-                    supabase.table('wallets').update(update_data).eq('user_id', user_id).execute()
-
-                    supabase.table('trades').insert({
-                        'user_id': user_id,
-                        'type': 'sell',
-                        'symbol': symbol,
-                        'btc_amount': btc_amount,
-                        'price': limit_price,
-                        'fee': fee
-                    }).execute()
-            except Exception as e:
-                print(f"Trigger sell execution failed for {symbol}: {e}")
-        else:
-            if 'wallet' not in session:
-                session['wallet'] = {
-                    'usd_balance': 100.0,
-                    'btc_balance': 0.0,
-                    'eth_balance': 0.0,
-                    'avg_buy_price': 0.0,
-                    'eth_avg_buy_price': 0.0
-                }
-            wallet = session['wallet']
-            usd_balance = float(wallet['usd_balance'])
-            new_usd = usd_balance + (usd_amount - fee)
-            new_wallet = dict(wallet)
-            new_wallet['usd_balance'] = new_usd
-            if symbol == 'BTCUSDT':
-                btc_balance = float(wallet.get('btc_balance', 0.0))
-                new_avg = float(wallet.get('avg_buy_price', 0.0)) if btc_balance > 0 else 0.0
-                new_wallet['avg_buy_price'] = new_avg
-            else:
-                eth_balance = float(wallet.get('eth_balance', 0.0))
-                new_avg = float(wallet.get('eth_avg_buy_price', 0.0)) if eth_balance > 0 else 0.0
-                new_wallet['eth_avg_buy_price'] = new_avg
-            session['wallet'] = new_wallet
-            if 'trades' not in session:
-                session['trades'] = []
-            session['trades'].insert(0, {
-                'id': len(session['trades']) + 1,
-                'user_id': user_id,
-                'type': 'sell',
-                'symbol': symbol,
-                'btc_amount': btc_amount,
-                'price': limit_price,
-                'fee': fee,
-                'timestamp': datetime.datetime.now().isoformat()
-            })
-
-    # Check BTC Buy
-    if limit_order_btc and limit_order_btc.get('active') and btc_price > 0:
-        if btc_price <= float(limit_order_btc['price']):
-            trigger_buy(limit_order_btc, 'BTCUSDT', float(limit_order_btc['price']))
-            session['limit_order'] = None
-            triggered_msg.append('Buy Limit ордер на BTC виконано!')
-            session_modified = True
-
-    # Check BTC Sell
-    if sell_limit_order_btc and sell_limit_order_btc.get('active') and btc_price > 0:
-        if btc_price >= float(sell_limit_order_btc['price']):
-            trigger_sell(sell_limit_order_btc, 'BTCUSDT', float(sell_limit_order_btc['price']))
-            session['sell_limit_order'] = None
-            triggered_msg.append('Sell Limit ордер на BTC виконано!')
-            session_modified = True
-
-    # Check ETH Buy
-    if limit_order_eth and limit_order_eth.get('active') and eth_price > 0:
-        if eth_price <= float(limit_order_eth['price']):
-            trigger_buy(limit_order_eth, 'ETHUSDT', float(limit_order_eth['price']))
-            session['limit_order_eth'] = None
-            triggered_msg.append('Buy Limit ордер на ETH виконано!')
-            session_modified = True
-
-    # Check ETH Sell
-    if sell_limit_order_eth and sell_limit_order_eth.get('active') and eth_price > 0:
-        if eth_price >= float(sell_limit_order_eth['price']):
-            trigger_sell(sell_limit_order_eth, 'ETHUSDT', float(sell_limit_order_eth['price']))
-            session['sell_limit_order_eth'] = None
-            triggered_msg.append('Sell Limit ордер на ETH виконано!')
-            session_modified = True
-
-    if session_modified:
-        session.modified = True
-        return jsonify({'triggered': True, 'message': ' & '.join(triggered_msg)}), 200
-
+    triggered = bg_check_limit_orders(user_id, btc_price, eth_price)
+    if triggered:
+        return jsonify({'triggered': True, 'message': 'Ордери перевірено та виконано!'}), 200
     return jsonify({'triggered': False, 'message': 'Цільову ціну не досягнуто.'}), 200
+
+@app.route('/api/exchange/bot-state', methods=['GET'])
+@login_required
+def get_bot_state_api():
+    user_id = session.get('user_id')
+    symbol = request.args.get('symbol', 'BTCUSDT')
+    if symbol not in ['BTCUSDT', 'ETHUSDT']:
+        return jsonify({'error': 'Invalid symbol'}), 400
+        
+    s = bg_get_bot_state(user_id, symbol)
+    trades = bg_get_bot_trades(user_id, symbol)
+    window_size = get_bot_window_size(user_id, symbol)
+    
+    return jsonify({
+        'usd': float(s['usd_balance']),
+        'asset': float(s['asset_balance']),
+        'tradeState': s['trade_state'],
+        'tradeSubState': s['trade_sub_state'],
+        'buyPrice': float(s['buy_price']),
+        'trades': trades,
+        'window_size': window_size
+    }), 200
+
+@app.route('/api/exchange/bot-reset', methods=['POST'])
+@login_required
+def reset_bot_api():
+    user_id = session.get('user_id')
+    data = request.json or {}
+    symbol = data.get('symbol', 'BTCUSDT')
+    if symbol not in ['BTCUSDT', 'ETHUSDT']:
+        return jsonify({'error': 'Invalid symbol'}), 400
+        
+    # Reset state
+    initial_state = {
+        'user_id': user_id,
+        'symbol': symbol,
+        'usd_balance': 100.0,
+        'asset_balance': 0.0,
+        'trade_state': 'idle',
+        'trade_sub_state': 'waiting_75',
+        'buy_price': 0.0
+    }
+    bg_save_bot_state(user_id, symbol, initial_state)
+    bg_clear_bot_trades(user_id, symbol)
+    
+    return jsonify({
+        'success': True,
+        'message': f'Баланс бота для {symbol} успішно скинуто!'
+    }), 200
+
+@app.route('/api/exchange/bot-window-size', methods=['POST'])
+@login_required
+def update_bot_window_size():
+    user_id = session.get('user_id')
+    data = request.json or {}
+    symbol = data.get('symbol', 'BTCUSDT')
+    size = data.get('size', 1500)
+    try:
+        size = int(size)
+        if size < 2:
+            return jsonify({'error': 'Invalid window size'}), 400
+    except ValueError:
+        return jsonify({'error': 'Invalid window size format'}), 400
+        
+    save_bot_window_size(user_id, symbol, size)
+    return jsonify({'success': True, 'window_size': size}), 200
 
 # --- Price Tick API ---
 

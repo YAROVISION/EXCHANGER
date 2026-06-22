@@ -35,5 +35,5 @@ Desktop.ini
 *.log
 
 # App data storage (dynamic)
-src/data/crypto_ticks.json
+src/data/
 

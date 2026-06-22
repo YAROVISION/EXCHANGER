@@ -496,13 +496,12 @@ async function updatePricesAndTriggers() {
                 s.val25Plus03History.shift();
             }
             
-            // Run virtual trading strategy
-            runBotTradingStrategy(asset, currentPrice, val25, val75);
+            // runBotTradingStrategy is now executed on the backend server for background processing
         }
     });
     
     if (state.activeTab === 'bot') {
-        updateBotUI();
+        await fetchBotState(state.selectedAsset);
     }
     
     // Call limit check endpoint to automatically execute matched orders if there are active limit orders
@@ -563,7 +562,7 @@ function initTabs() {
                 if (botCourseStatsSection) botCourseStatsSection.classList.remove('hidden');
                 
                 botTab.classList.remove('hidden');
-                updateBotUI();
+                fetchBotState(state.selectedAsset);
                 setTimeout(updatePriceHistoryChart, 50);
             } else {
                 if (realHistorySection) realHistorySection.classList.remove('hidden');
@@ -737,7 +736,7 @@ function initBot() {
     const sizeInput = document.getElementById('metrics-history-size');
     if (sizeInput) {
         sizeInput.value = state.botHistoryWindowSize;
-        sizeInput.addEventListener('change', (e) => {
+        sizeInput.addEventListener('change', async (e) => {
             let val = parseInt(e.target.value);
             if (isNaN(val) || val < 2) val = 2;
             state.botHistoryWindowSize = val;
@@ -750,7 +749,18 @@ function initBot() {
                 }
                 recalculateAssetMetrics(asset);
             });
-            updateBotUI();
+            
+            // Sync window size with backend
+            try {
+                await fetch('/api/exchange/bot-window-size', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ symbol: state.selectedAsset === 'BTC' ? 'BTCUSDT' : 'ETHUSDT', size: val })
+                });
+                await fetchBotState(state.selectedAsset);
+            } catch (err) {
+                console.error("Failed to update bot window size on server:", err);
+            }
         });
     }
     
@@ -765,17 +775,48 @@ function initBot() {
     
     const resetBtn = document.getElementById('reset-virtual-profit-btn');
     if (resetBtn) {
-        resetBtn.addEventListener('click', () => {
+        resetBtn.addEventListener('click', async () => {
             if (!confirm("Ви впевнені, що хочете скинути віртуальний баланс та історію угод для " + state.selectedAsset + "?")) return;
-            let s = state.botState[state.selectedAsset];
-            s.usd = 100.00;
-            s.asset = 0.0;
-            s.tradeState = 'idle';
-            s.tradeSubState = 'waiting_75';
-            s.buyPrice = 0;
-            s.trades = [];
-            updateBotUI();
+            try {
+                const res = await fetch('/api/exchange/bot-reset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ symbol: state.selectedAsset === 'BTC' ? 'BTCUSDT' : 'ETHUSDT' })
+                });
+                if (res.ok) {
+                    await fetchBotState(state.selectedAsset);
+                }
+            } catch (err) {
+                console.error("Failed to reset bot state:", err);
+            }
         });
+    }
+}
+
+async function fetchBotState(asset) {
+    const symbol = asset === 'BTC' ? 'BTCUSDT' : 'ETHUSDT';
+    try {
+        const res = await fetch(`/api/exchange/bot-state?symbol=${symbol}`);
+        if (res.ok) {
+            const data = await res.json();
+            let s = state.botState[asset];
+            s.usd = data.usd;
+            s.asset = data.asset;
+            s.tradeState = data.tradeState;
+            s.tradeSubState = data.tradeSubState;
+            s.buyPrice = data.buyPrice;
+            s.trades = data.trades;
+            state.botHistoryWindowSize = data.window_size;
+            
+            const sizeInput = document.getElementById('metrics-history-size');
+            if (sizeInput) {
+                sizeInput.value = data.window_size;
+            }
+            
+            updateBotUI();
+        }
+    } catch (e) {
+        console.error(`Failed to fetch bot state for ${asset}:`, e);
     }
 }
 
@@ -791,7 +832,7 @@ async function fetchTicksHistoryFor(asset) {
             s.priceHistory = loadedTicks.slice(-state.botHistoryWindowSize);
             
             recalculateAssetMetrics(asset);
-            updateBotUI();
+            await fetchBotState(asset); // Get the persistent server state of the bot
         }
     } catch (e) {
         console.error(`Failed to fetch ticks history for ${asset}:`, e);
