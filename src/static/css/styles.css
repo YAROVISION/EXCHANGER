@@ -32,6 +32,7 @@ body {
     font-family: 'JetBrains Mono', monospace;
     background: linear-gradient(135deg, var(--coffee-darker) 0%, var(--coffee-dark) 100%);
     min-height: 100vh;
+    min-width: 433px;
     color: var(--text-light);
     overflow-x: hidden;
 }
@@ -152,6 +153,7 @@ body {
     grid-template-rows: 60px 1fr 30px;
     height: 100vh;
     width: 100vw;
+    min-width: 433px;
 }
 
 .app-layout.hidden {
@@ -666,6 +668,7 @@ body {
         justify-content: center;
         width: 100%;
         gap: 1rem;
+        flex-wrap: wrap;
     }
 
     .ticker-item {
@@ -685,6 +688,25 @@ body {
 @media (max-width: 600px) {
     body {
         font-size: 14px;
+    }
+
+    .user-profile {
+        flex-direction: column;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .user-profile .btn-logout {
+        width: 100%;
+        text-align: center;
+    }
+
+    .tab-desc {
+        display: none;
+    }
+
+    .tab-btn {
+        padding: 0.6rem 0.4rem;
     }
 
     .login-card {
