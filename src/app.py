@@ -195,8 +195,13 @@ def save_local_wallet(user_id, wallet_data):
     except Exception as e:
         print(f"Error writing local_wallet.json: {e}")
 
+def is_fallback_mode():
+    if TICK_SYNC_WRITE_ENABLED:
+        return False
+    return session.get('use_session_fallback', False)
+
 def get_user_wallet(user_id):
-    if supabase and not session.get('use_session_fallback'):
+    if supabase and not is_fallback_mode():
         try:
             res = supabase.table('wallets').select('*').eq('user_id', user_id).execute()
             data = getattr(res, 'data', [])
@@ -214,13 +219,17 @@ def get_user_wallet(user_id):
                 supabase.table('wallets').insert(new_wallet).execute()
                 return new_wallet
         except Exception as e:
+            if TICK_SYNC_WRITE_ENABLED:
+                raise Exception(f"Supabase wallet fetch failed: {str(e)}")
             print(f"Supabase wallet fetch failed, using local fallback: {e}")
             session['use_session_fallback'] = True
             session.modified = True
+    if TICK_SYNC_WRITE_ENABLED:
+        raise Exception("Supabase is not initialized or database connection failed (TICK_SYNC_WRITE_ENABLED is active)")
     return load_local_wallet(user_id)
 
 def save_user_wallet(user_id, wallet_data):
-    if supabase and not session.get('use_session_fallback'):
+    if supabase and not is_fallback_mode():
         try:
             update_data = {
                 'usd_balance': float(wallet_data['usd_balance']),
@@ -233,9 +242,13 @@ def save_user_wallet(user_id, wallet_data):
             supabase.table('wallets').update(update_data).eq('user_id', user_id).execute()
             return True
         except Exception as e:
+            if TICK_SYNC_WRITE_ENABLED:
+                raise Exception(f"Supabase wallet update failed: {str(e)}")
             print(f"Supabase wallet update failed, using local fallback: {e}")
             session['use_session_fallback'] = True
             session.modified = True
+    if TICK_SYNC_WRITE_ENABLED:
+        raise Exception("Supabase is not initialized or database connection failed (TICK_SYNC_WRITE_ENABLED is active)")
     save_local_wallet(user_id, wallet_data)
     return True
 
@@ -247,7 +260,11 @@ def bg_get_user_wallet(user_id):
             if data:
                 return data[0]
         except Exception as e:
+            if TICK_SYNC_WRITE_ENABLED:
+                raise Exception(f"Background wallet fetch from Supabase failed: {str(e)}")
             print(f"Background wallet fetch from Supabase failed: {e}")
+    if TICK_SYNC_WRITE_ENABLED:
+        raise Exception("Supabase is not initialized or database connection failed (TICK_SYNC_WRITE_ENABLED is active)")
     return load_local_wallet(user_id)
 
 def bg_save_user_wallet(user_id, wallet_data):
@@ -264,17 +281,25 @@ def bg_save_user_wallet(user_id, wallet_data):
             supabase.table('wallets').update(update_data).eq('user_id', user_id).execute()
             return True
         except Exception as e:
+            if TICK_SYNC_WRITE_ENABLED:
+                raise Exception(f"Background wallet update to Supabase failed: {str(e)}")
             print(f"Background wallet update to Supabase failed: {e}")
+    if TICK_SYNC_WRITE_ENABLED:
+        raise Exception("Supabase is not initialized or database connection failed (TICK_SYNC_WRITE_ENABLED is active)")
     save_local_wallet(user_id, wallet_data)
     return True
 
 def get_active_limit_orders_for_user(user_id):
-    if supabase and not session.get('use_session_fallback'):
+    if supabase and not is_fallback_mode():
         try:
             res = supabase.table('limit_orders').select('*').eq('user_id', user_id).eq('active', True).execute()
             return getattr(res, 'data', [])
         except Exception as e:
+            if TICK_SYNC_WRITE_ENABLED:
+                raise Exception(f"Error fetching active limit orders from Supabase: {str(e)}")
             print(f"Error fetching active limit orders from Supabase: {e}")
+    if TICK_SYNC_WRITE_ENABLED:
+        raise Exception("Supabase is not initialized or database connection failed (TICK_SYNC_WRITE_ENABLED is active)")
     orders = []
     if os.path.exists(LIMIT_ORDERS_FILE):
         try:
@@ -307,12 +332,16 @@ def map_orders_to_keys(orders_list):
     return res
 
 def add_limit_order_to_db(order_data):
-    if supabase and not session.get('use_session_fallback'):
+    if supabase and not is_fallback_mode():
         try:
             supabase.table('limit_orders').insert(order_data).execute()
             return True
         except Exception as e:
+            if TICK_SYNC_WRITE_ENABLED:
+                raise Exception(f"Error saving limit order to Supabase: {str(e)}")
             print(f"Error saving limit order to Supabase: {e}")
+    if TICK_SYNC_WRITE_ENABLED:
+        raise Exception("Supabase is not initialized or database connection failed (TICK_SYNC_WRITE_ENABLED is active)")
     orders = []
     if os.path.exists(LIMIT_ORDERS_FILE):
         try:
@@ -329,12 +358,16 @@ def add_limit_order_to_db(order_data):
     return True
 
 def cancel_limit_order_in_db(user_id, symbol, type_):
-    if supabase and not session.get('use_session_fallback'):
+    if supabase and not is_fallback_mode():
         try:
             supabase.table('limit_orders').update({'active': False}).eq('user_id', user_id).eq('symbol', symbol).eq('type', type_).eq('active', True).execute()
             return True
         except Exception as e:
+            if TICK_SYNC_WRITE_ENABLED:
+                raise Exception(f"Error canceling limit order in Supabase: {str(e)}")
             print(f"Error canceling limit order in Supabase: {e}")
+    if TICK_SYNC_WRITE_ENABLED:
+        raise Exception("Supabase is not initialized or database connection failed (TICK_SYNC_WRITE_ENABLED is active)")
     orders = []
     if os.path.exists(LIMIT_ORDERS_FILE):
         try:
@@ -1026,7 +1059,7 @@ def exchange_wallet():
     mapped_orders = map_orders_to_keys(active_orders)
     
     # 1. Try Supabase
-    if supabase and not session.get('use_session_fallback'):
+    if supabase and not is_fallback_mode():
         try:
             res = supabase.table('wallets').select('*').eq('user_id', user_id).execute()
             data = getattr(res, 'data', [])
@@ -1042,6 +1075,8 @@ def exchange_wallet():
                         has_symbol = False
                 
                 if not has_eth or not has_symbol:
+                    if TICK_SYNC_WRITE_ENABLED:
+                        return jsonify({'error': 'Database schema is incomplete (missing eth_balance or trades.symbol)'}), 500
                     print("[WARNING] Database schema is incomplete. Forcing session fallback and preserving database balances.")
                     session['use_session_fallback'] = True
                     session['wallet'] = {
@@ -1080,10 +1115,15 @@ def exchange_wallet():
                     **mapped_orders
                 }), 200
         except Exception as e:
+            if TICK_SYNC_WRITE_ENABLED:
+                return jsonify({'error': f'Database connection error: {str(e)}'}), 503
             print(f"Error fetching wallet from Supabase: {str(e)}")
             session['use_session_fallback'] = True
             session.modified = True
             
+    if TICK_SYNC_WRITE_ENABLED:
+        return jsonify({'error': 'Supabase connection failed (TICK_SYNC_WRITE_ENABLED is active)'}), 503
+        
     # 2. Fallback to local persistent wallet
     wallet_data = load_local_wallet(user_id)
     return jsonify({
@@ -1096,16 +1136,21 @@ def exchange_wallet():
 def exchange_history():
     user_id = session.get('user_id')
     
-    if supabase and not session.get('use_session_fallback'):
+    if supabase and not is_fallback_mode():
         try:
             res = supabase.table('trades').select('*').eq('user_id', user_id).order('timestamp', desc=True).execute()
             data = getattr(res, 'data', [])
             return jsonify(data), 200
         except Exception as e:
+            if TICK_SYNC_WRITE_ENABLED:
+                return jsonify({'error': f'Database connection error: {str(e)}'}), 503
             print(f"Error fetching history from Supabase: {str(e)}")
             session['use_session_fallback'] = True
             session.modified = True
             
+    if TICK_SYNC_WRITE_ENABLED:
+        return jsonify({'error': 'Supabase connection failed (TICK_SYNC_WRITE_ENABLED is active)'}), 503
+        
     # Fallback to local persistent trades
     return jsonify(load_local_trades(user_id)), 200
 
@@ -1242,12 +1287,16 @@ def exchange_reset():
     user_id = session.get('user_id')
     
     # Deactivate active limit orders
-    if supabase and not session.get('use_session_fallback'):
+    if supabase and not is_fallback_mode():
         try:
             supabase.table('limit_orders').update({'active': False}).eq('user_id', user_id).execute()
         except Exception as e:
+            if TICK_SYNC_WRITE_ENABLED:
+                return jsonify({'error': f'Database connection error: {str(e)}'}), 503
             print(f"Error resetting limit orders in Supabase: {e}")
     else:
+        if TICK_SYNC_WRITE_ENABLED:
+            return jsonify({'error': 'Supabase connection failed (TICK_SYNC_WRITE_ENABLED is active)'}), 503
         if os.path.exists(LIMIT_ORDERS_FILE):
             try:
                 with open(LIMIT_ORDERS_FILE, 'r', encoding='utf-8') as f:
@@ -1261,7 +1310,7 @@ def exchange_reset():
                 pass
 
     # Reset main wallet balance and trades
-    if supabase and not session.get('use_session_fallback'):
+    if supabase and not is_fallback_mode():
         try:
             supabase.table('wallets').update({
                 'usd_balance': 100.0,
@@ -1287,7 +1336,12 @@ def exchange_reset():
                 'message': 'Баланс успішно скинуто, історію очищено!'
             }), 200
         except Exception as e:
+            if TICK_SYNC_WRITE_ENABLED:
+                return jsonify({'error': f'Database connection error: {str(e)}'}), 503
             print(f"Supabase reset failed: {str(e)}")
+            
+    if TICK_SYNC_WRITE_ENABLED:
+        return jsonify({'error': 'Supabase connection failed (TICK_SYNC_WRITE_ENABLED is active)'}), 503
             
     # Reset local persistent fallback
     reset_wallet = {
