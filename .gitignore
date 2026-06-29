@@ -37,3 +37,5 @@ Desktop.ini
 # App data storage (dynamic)
 src/data/
 
+# Analytics folder
+analitic/

@@ -19,7 +19,7 @@ let state = {
             usd: 100.00,
             asset: 0.0,
             tradeState: 'idle',
-            tradeSubState: 'waiting_75',
+            tradeSubState: 'waiting_below_25',
             buyPrice: 0,
             trades: [],
             priceHistory: [],
@@ -32,7 +32,7 @@ let state = {
             usd: 100.00,
             asset: 0.0,
             tradeState: 'idle',
-            tradeSubState: 'waiting_75',
+            tradeSubState: 'waiting_below_25',
             buyPrice: 0,
             trades: [],
             priceHistory: [],
@@ -896,24 +896,30 @@ function runBotTradingStrategy(asset, currentPrice, val25, val75) {
     const feeRate = 0.001; 
     
     if (s.tradeState === 'idle') {
-        if (currentPrice <= val25) {
-            if (s.usd > 0) {
-                const totalCost = s.usd;
-                s.asset = totalCost / (currentPrice * (1 + feeRate));
-                const fee = s.asset * currentPrice * feeRate;
-                s.usd = 0;
-                s.tradeState = 'holding';
-                s.tradeSubState = 'waiting_75';
-                s.buyPrice = currentPrice;
-                
-                s.trades.unshift({
-                    type: 'buy',
-                    timestamp: new Date().toISOString(),
-                    amount: s.asset,
-                    price: currentPrice,
-                    fee: fee,
-                    total: totalCost
-                });
+        if (s.tradeSubState !== 'triggered_below_25') {
+            if (currentPrice <= val25) {
+                s.tradeSubState = 'triggered_below_25';
+            }
+        } else {
+            if (currentPrice >= val25) {
+                if (s.usd > 0) {
+                    const totalCost = s.usd;
+                    s.asset = totalCost / (currentPrice * (1 + feeRate));
+                    const fee = s.asset * currentPrice * feeRate;
+                    s.usd = 0;
+                    s.tradeState = 'holding';
+                    s.tradeSubState = 'waiting_75';
+                    s.buyPrice = currentPrice;
+                    
+                    s.trades.unshift({
+                        type: 'buy',
+                        timestamp: new Date().toISOString(),
+                        amount: s.asset,
+                        price: currentPrice,
+                        fee: fee,
+                        total: totalCost
+                    });
+                }
             }
         }
     } else if (s.tradeState === 'holding') {
@@ -937,7 +943,7 @@ function runBotTradingStrategy(asset, currentPrice, val25, val75) {
                         
                         s.asset = 0;
                         s.tradeState = 'idle';
-                        s.tradeSubState = 'waiting_75';
+                        s.tradeSubState = 'waiting_below_25';
                         s.buyPrice = 0;
                     } else {
                         s.tradeSubState = 'waiting_breakeven';
@@ -962,7 +968,7 @@ function runBotTradingStrategy(asset, currentPrice, val25, val75) {
                     
                     s.asset = 0;
                     s.tradeState = 'idle';
-                    s.tradeSubState = 'waiting_75';
+                    s.tradeSubState = 'waiting_below_25';
                     s.buyPrice = 0;
                 }
             }
@@ -1041,6 +1047,12 @@ function updateBotUI() {
             }
         } else if (s.priceHistory.length < state.botHistoryWindowSize) {
             text += ` | Накопичення (${s.priceHistory.length}/${state.botHistoryWindowSize})`;
+        } else {
+            if (s.tradeSubState === 'triggered_below_25') {
+                text += ` | <span style="color:var(--color-success); font-weight:bold;">Клапан активовано (купівля при ≥ $${val25.toLocaleString(undefined, {maximumFractionDigits: 2})})</span>`;
+            } else {
+                text += ` | Очікування падіння нижче $${val25.toLocaleString(undefined, {maximumFractionDigits: 2})}`;
+            }
         }
         text += `</div>`;
         virtualProfitEl.innerHTML = text;
