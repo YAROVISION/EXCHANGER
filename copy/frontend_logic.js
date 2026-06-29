@@ -21,7 +21,8 @@ let btcPriceHistory50 = [];       // Raw BTC price updates
 let btcAverageHistory50 = [];     // Running average calculation history
 let btc75History50 = [];          // 75% level history
 let btc25History50 = [];          // 25% level history
-let btc25Plus03History50 = [];    // 25% level + 0.3% buffer history
+let btc13History50 = [];          // 13% level history
+let btc13Plus03History50 = [];    // 13% level + 0.3% buffer history
 
 // History window size (Corresponds to "Кількість тіків", defaults to 1500)
 let btcHistoryWindowSize = 1500; 
@@ -114,6 +115,7 @@ function addBtcPriceToHistory(price) {
     const diff = max - min;
     const val75 = min + 0.75 * diff;
     const val25 = min + 0.25 * diff;
+    const val13 = min + 0.13 * diff;
     
     btc75History50.push(val75);
     while (btc75History50.length > btcHistoryWindowSize) {
@@ -123,9 +125,13 @@ function addBtcPriceToHistory(price) {
     while (btc25History50.length > btcHistoryWindowSize) {
         btc25History50.shift();
     }
-    btc25Plus03History50.push(val25 * 1.003);
-    while (btc25Plus03History50.length > btcHistoryWindowSize) {
-        btc25Plus03History50.shift();
+    btc13History50.push(val13);
+    while (btc13History50.length > btcHistoryWindowSize) {
+        btc13History50.shift();
+    }
+    btc13Plus03History50.push(val13 * 1.003);
+    while (btc13Plus03History50.length > btcHistoryWindowSize) {
+        btc13Plus03History50.shift();
     }
 }
 
@@ -136,7 +142,8 @@ function recalculateAllHistoryMetrics() {
     btcAverageHistory50 = [];
     btc75History50 = [];
     btc25History50 = [];
-    btc25Plus03History50 = [];
+    btc13History50 = [];
+    btc13Plus03History50 = [];
 
     for (let i = 0; i < btcPriceHistory50.length; i++) {
         const startIdx = Math.max(0, i - btcHistoryWindowSize + 1);
@@ -151,10 +158,12 @@ function recalculateAllHistoryMetrics() {
         const diff = max - min;
         const val75 = min + 0.75 * diff;
         const val25 = min + 0.25 * diff;
+        const val13 = min + 0.13 * diff;
 
         btc75History50.push(val75);
         btc25History50.push(val25);
-        btc25Plus03History50.push(val25 * 1.003);
+        btc13History50.push(val13);
+        btc13Plus03History50.push(val13 * 1.003);
     }
 }
 
@@ -252,6 +261,8 @@ function updatePriceHistoryMetrics() {
     const pct75DiffEl = document.getElementById('metrics-price-75-diff');
     const pct25El = document.getElementById('metrics-price-25');
     const pct25DiffEl = document.getElementById('metrics-price-25-diff');
+    const pct13El = document.getElementById('metrics-price-13');
+    const pct13DiffEl = document.getElementById('metrics-price-13-diff');
 
     if (countEl) countEl.textContent = btcPriceHistory50.length;
 
@@ -265,6 +276,8 @@ function updatePriceHistoryMetrics() {
         if (pct75DiffEl) pct75DiffEl.textContent = '-';
         if (pct25El) pct25El.textContent = '$-.--';
         if (pct25DiffEl) pct25DiffEl.textContent = '-';
+        if (pct13El) pct13El.textContent = '$-.--';
+        if (pct13DiffEl) pct13DiffEl.textContent = '-';
         
         const virtualProfitEl = document.getElementById('metrics-virtual-profit');
         if (virtualProfitEl) {
@@ -286,21 +299,30 @@ function updatePriceHistoryMetrics() {
     
     const val25 = minPrice + 0.25 * diff;
     const diff25 = 0.25 * diff;
+    
+    const val13 = minPrice + 0.13 * diff;
+    const diff13 = 0.13 * diff;
 
     // ------------------------------------------
     // VIRTUAL LEVEL-TRADING ALGORITHM
     // ------------------------------------------
     if (currentBtcPrice > 0 && btcPriceHistory50.length >= 2 && maxPrice > minPrice) {
         if (virtualTradeState === 'idle') {
-            // BUY condition: Price falls below or meets the 25% boundary line
-            // (Only triggers when history array is fully loaded up to window size)
-            if (currentBtcPrice <= val25 && btcPriceHistory50.length >= btcHistoryWindowSize) {
-                if (virtualWalletUsd > 0) {
-                    virtualWalletBtc = virtualWalletUsd / (currentBtcPrice * 1.001); // 0.1% buy commission
-                    virtualWalletUsd = 0;
-                    virtualTradeState = 'holding';
-                    virtualTradeSubState = 'waiting_75';
-                    virtualBuyPrice = currentBtcPrice;
+            if (virtualTradeSubState !== 'triggered_below_13') {
+                if (currentBtcPrice <= val13 && btcPriceHistory50.length >= btcHistoryWindowSize) {
+                    virtualTradeSubState = 'triggered_below_13';
+                }
+            } else {
+                if (currentBtcPrice >= val25) {
+                    if (virtualWalletUsd > 0) {
+                        virtualWalletBtc = virtualWalletUsd / (currentBtcPrice * 1.001); // 0.1% buy commission
+                        virtualWalletUsd = 0;
+                        virtualTradeState = 'holding';
+                        virtualTradeSubState = 'waiting_75';
+                        virtualBuyPrice = currentBtcPrice;
+                    } else {
+                        virtualTradeSubState = 'waiting_below_13';
+                    }
                 }
             }
         } else if (virtualTradeState === 'holding') {
@@ -313,7 +335,7 @@ function updatePriceHistoryMetrics() {
                             virtualWalletUsd = virtualWalletBtc * currentBtcPrice * 0.999; // 0.1% sell commission
                             virtualWalletBtc = 0;
                             virtualTradeState = 'idle';
-                            virtualTradeSubState = 'waiting_75';
+                            virtualTradeSubState = 'waiting_below_13';
                             virtualBuyPrice = 0;
                         } else {
                             // If 75% boundary is hit but commission eats the profit, transition to breakeven safety mode
@@ -329,7 +351,7 @@ function updatePriceHistoryMetrics() {
                         virtualWalletUsd = virtualWalletBtc * currentBtcPrice * 0.999;
                         virtualWalletBtc = 0;
                         virtualTradeState = 'idle';
-                        virtualTradeSubState = 'waiting_75';
+                        virtualTradeSubState = 'waiting_below_13';
                         virtualBuyPrice = 0;
                     }
                 }
@@ -351,6 +373,8 @@ function updatePriceHistoryMetrics() {
     
     if (pct25El) pct25El.textContent = format(val25);
     if (pct25DiffEl) pct25DiffEl.textContent = `25% від різниці: $${diff25.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    if (pct13El) pct13El.textContent = format(val13);
+    if (pct13DiffEl) pct13DiffEl.textContent = `13% від різниці: $${diff13.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
 
     // Render Virtual Profit details
     const virtualProfitEl = document.getElementById('metrics-virtual-profit');
@@ -568,6 +592,7 @@ function updatePriceHistoryChart() {
     
     const val75 = minPrice + 0.75 * diff;
     const val25 = minPrice + 0.25 * diff;
+    const val13 = minPrice + 0.13 * diff;
 
     const xValues = btcPriceHistory50.map((_, i) => i + 1);
 
@@ -658,6 +683,19 @@ function updatePriceHistoryChart() {
         mode: 'lines',
         name: '25% Рівень',
         line: {
+            color: '#26a69a', // Teal
+            width: 1.2,
+            dash: 'dashdot'
+        },
+        hoverinfo: 'name+y'
+    };
+
+    const val13Line = {
+        x: xValues,
+        y: btc13History50,
+        mode: 'lines',
+        name: '13% Рівень',
+        line: {
             color: '#1976d2',
             width: 1.2,
             dash: 'dashdot'
@@ -667,9 +705,9 @@ function updatePriceHistoryChart() {
         hoverinfo: 'name+y'
     };
     
-    const val25Plus03Line = {
+    const val13Plus03Line = {
         x: xValues,
-        y: btc25Plus03History50,
+        y: btc13Plus03History50,
         mode: 'lines',
         name: '0.3%',
         line: {
@@ -717,14 +755,15 @@ function updatePriceHistoryChart() {
         data.push(breakevenTrace);
     }
 
-    data.push(val75Line, maxLine, avgLine, minLine, val25Line, val25Plus03Line);
+    data.push(val75Line, maxLine, avgLine, minLine, val25Line, val13Line, val13Plus03Line);
 
     // Calculate Y range with padding
     let allDisplayedValues = [...btcPriceHistory50];
     if (btcAverageHistory50.length > 0) allDisplayedValues.push(...btcAverageHistory50);
     if (btc75History50.length > 0) allDisplayedValues.push(...btc75History50);
     if (btc25History50.length > 0) allDisplayedValues.push(...btc25History50);
-    if (btc25Plus03History50.length > 0) allDisplayedValues.push(...btc25Plus03History50);
+    if (btc13History50.length > 0) allDisplayedValues.push(...btc13History50);
+    if (btc13Plus03History50.length > 0) allDisplayedValues.push(...btc13Plus03History50);
     if (virtualTradeState === 'holding' && virtualBuyPrice > 0) {
         allDisplayedValues.push(virtualBuyPrice);
         allDisplayedValues.push(virtualBuyPrice * 1.003);

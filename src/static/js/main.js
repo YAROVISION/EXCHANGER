@@ -19,27 +19,29 @@ let state = {
             usd: 100.00,
             asset: 0.0,
             tradeState: 'idle',
-            tradeSubState: 'waiting_below_25',
+            tradeSubState: 'waiting_below_13',
             buyPrice: 0,
             trades: [],
             priceHistory: [],
             averageHistory: [],
             val75History: [],
             val25History: [],
-            val25Plus03History: []
+            val13History: [],
+            val13Plus03History: []
         },
         ETH: {
             usd: 100.00,
             asset: 0.0,
             tradeState: 'idle',
-            tradeSubState: 'waiting_below_25',
+            tradeSubState: 'waiting_below_13',
             buyPrice: 0,
             trades: [],
             priceHistory: [],
             averageHistory: [],
             val75History: [],
             val25History: [],
-            val25Plus03History: []
+            val13History: [],
+            val13Plus03History: []
         }
     }
 };
@@ -467,7 +469,7 @@ async function updatePricesAndTriggers() {
                 s.priceHistory.shift();
             }
             
-            // Calculate current average, 75%, 25%, etc., and append to histories
+            // Calculate current average, 75%, 13%, etc., and append to histories
             const sum = s.priceHistory.reduce((a, b) => a + b, 0);
             const avg = sum / s.priceHistory.length;
             s.averageHistory.push(avg);
@@ -480,6 +482,7 @@ async function updatePricesAndTriggers() {
             const diff = max - min;
             const val75 = min + 0.75 * diff;
             const val25 = min + 0.25 * diff;
+            const val13 = min + 0.13 * diff;
             
             s.val75History.push(val75);
             while (s.val75History.length > state.botHistoryWindowSize) {
@@ -491,9 +494,14 @@ async function updatePricesAndTriggers() {
                 s.val25History.shift();
             }
             
-            s.val25Plus03History.push(val25 * 1.003);
-            while (s.val25Plus03History.length > state.botHistoryWindowSize) {
-                s.val25Plus03History.shift();
+            s.val13History.push(val13);
+            while (s.val13History.length > state.botHistoryWindowSize) {
+                s.val13History.shift();
+            }
+            
+            s.val13Plus03History.push(val13 * 1.003);
+            while (s.val13Plus03History.length > state.botHistoryWindowSize) {
+                s.val13Plus03History.shift();
             }
             
             // runBotTradingStrategy is now executed on the backend server for background processing
@@ -861,7 +869,8 @@ function recalculateAssetMetrics(asset) {
     s.averageHistory = [];
     s.val75History = [];
     s.val25History = [];
-    s.val25Plus03History = [];
+    s.val13History = [];
+    s.val13Plus03History = [];
     
     for (let i = 0; i < s.priceHistory.length; i++) {
         const startIdx = Math.max(0, i - state.botHistoryWindowSize + 1);
@@ -876,14 +885,16 @@ function recalculateAssetMetrics(asset) {
         const diff = max - min;
         const val75 = min + 0.75 * diff;
         const val25 = min + 0.25 * diff;
+        const val13 = min + 0.13 * diff;
         
         s.val75History.push(val75);
         s.val25History.push(val25);
-        s.val25Plus03History.push(val25 * 1.003);
+        s.val13History.push(val13);
+        s.val13Plus03History.push(val13 * 1.003);
     }
 }
 
-function runBotTradingStrategy(asset, currentPrice, val25, val75) {
+function runBotTradingStrategy(asset, currentPrice) {
     let s = state.botState[asset];
     if (s.priceHistory.length < 2) return;
     
@@ -892,13 +903,17 @@ function runBotTradingStrategy(asset, currentPrice, val25, val75) {
     const maxPrice = Math.max(...s.priceHistory);
     const minPrice = Math.min(...s.priceHistory);
     if (maxPrice <= minPrice) return;
+    const diff = maxPrice - minPrice;
+    const val75 = minPrice + 0.75 * diff;
+    const val25 = minPrice + 0.25 * diff;
+    const val13 = minPrice + 0.13 * diff;
     
     const feeRate = 0.001; 
     
     if (s.tradeState === 'idle') {
-        if (s.tradeSubState !== 'triggered_below_25') {
-            if (currentPrice <= val25) {
-                s.tradeSubState = 'triggered_below_25';
+        if (s.tradeSubState !== 'triggered_below_13') {
+            if (currentPrice <= val13) {
+                s.tradeSubState = 'triggered_below_13';
             }
         } else {
             if (currentPrice >= val25) {
@@ -919,6 +934,8 @@ function runBotTradingStrategy(asset, currentPrice, val25, val75) {
                         fee: fee,
                         total: totalCost
                     });
+                } else {
+                    s.tradeSubState = 'waiting_below_13';
                 }
             }
         }
@@ -943,7 +960,7 @@ function runBotTradingStrategy(asset, currentPrice, val25, val75) {
                         
                         s.asset = 0;
                         s.tradeState = 'idle';
-                        s.tradeSubState = 'waiting_below_25';
+                        s.tradeSubState = 'waiting_below_13';
                         s.buyPrice = 0;
                     } else {
                         s.tradeSubState = 'waiting_breakeven';
@@ -968,7 +985,7 @@ function runBotTradingStrategy(asset, currentPrice, val25, val75) {
                     
                     s.asset = 0;
                     s.tradeState = 'idle';
-                    s.tradeSubState = 'waiting_below_25';
+                    s.tradeSubState = 'waiting_below_13';
                     s.buyPrice = 0;
                 }
             }
@@ -989,6 +1006,8 @@ function updateBotUI() {
     const pct75DiffEl = document.getElementById('metrics-price-75-diff');
     const pct25El = document.getElementById('metrics-price-25');
     const pct25DiffEl = document.getElementById('metrics-price-25-diff');
+    const pct13El = document.getElementById('metrics-price-13');
+    const pct13DiffEl = document.getElementById('metrics-price-13-diff');
     const virtualProfitEl = document.getElementById('metrics-virtual-profit');
     
     const format = (val) => `$${val.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
@@ -1002,6 +1021,8 @@ function updateBotUI() {
         if (pct75DiffEl) pct75DiffEl.textContent = '-';
         if (pct25El) pct25El.textContent = '$-.--';
         if (pct25DiffEl) pct25DiffEl.textContent = '-';
+        if (pct13El) pct13El.textContent = '$-.--';
+        if (pct13DiffEl) pct13DiffEl.textContent = '-';
         if (virtualProfitEl) {
             virtualProfitEl.innerHTML = `$100.00 USD / 0.00000000 ${asset}<br><span style="font-size:10px; color:var(--coffee-light);">Накопичення історії (0/${state.botHistoryWindowSize})</span>`;
             virtualProfitEl.style.color = 'var(--text-light)';
@@ -1016,6 +1037,7 @@ function updateBotUI() {
     const diff = maxPrice - minPrice;
     const val75 = minPrice + 0.75 * diff;
     const val25 = minPrice + 0.25 * diff;
+    const val13 = minPrice + 0.13 * diff;
     
     const currentPrice = state.prices[asset] || s.priceHistory[s.priceHistory.length - 1];
     
@@ -1027,6 +1049,8 @@ function updateBotUI() {
     if (pct75DiffEl) pct75DiffEl.textContent = `75% від різниці: $${(0.75 * diff).toLocaleString(undefined, {maximumFractionDigits: 2})}`;
     if (pct25El) pct25El.textContent = format(val25);
     if (pct25DiffEl) pct25DiffEl.textContent = `25% від різниці: $${(0.25 * diff).toLocaleString(undefined, {maximumFractionDigits: 2})}`;
+    if (pct13El) pct13El.textContent = format(val13);
+    if (pct13DiffEl) pct13DiffEl.textContent = `13% від різниці: $${(0.13 * diff).toLocaleString(undefined, {maximumFractionDigits: 2})}`;
     
     // Virtual Profit Display
     const currentEquity = s.usd + (s.asset * currentPrice * 0.999);
@@ -1048,10 +1072,10 @@ function updateBotUI() {
         } else if (s.priceHistory.length < state.botHistoryWindowSize) {
             text += ` | Накопичення (${s.priceHistory.length}/${state.botHistoryWindowSize})`;
         } else {
-            if (s.tradeSubState === 'triggered_below_25') {
+            if (s.tradeSubState === 'triggered_below_13') {
                 text += ` | <span style="color:var(--color-success); font-weight:bold;">Клапан активовано (купівля при ≥ $${val25.toLocaleString(undefined, {maximumFractionDigits: 2})})</span>`;
             } else {
-                text += ` | Очікування падіння нижче $${val25.toLocaleString(undefined, {maximumFractionDigits: 2})}`;
+                text += ` | Очікування падіння нижче $${val13.toLocaleString(undefined, {maximumFractionDigits: 2})}`;
             }
         }
         text += `</div>`;
@@ -1169,6 +1193,7 @@ function updatePriceHistoryChart() {
     
     const val75 = minPrice + 0.75 * diff;
     const val25 = minPrice + 0.25 * diff;
+    const val13 = minPrice + 0.13 * diff;
     
     const xValues = s.priceHistory.map((_, i) => i + 1);
     const currentPrice = state.prices[asset] || s.priceHistory[s.priceHistory.length - 1];
@@ -1263,6 +1288,19 @@ function updatePriceHistoryChart() {
         mode: 'lines',
         name: '25% Рівень',
         line: {
+            color: '#26a69a', // Teal
+            width: 1.2,
+            dash: 'dashdot'
+        },
+        hoverinfo: 'name+y'
+    };
+
+    const val13Line = {
+        x: xValues,
+        y: s.val13History,
+        mode: 'lines',
+        name: '13% Рівень',
+        line: {
             color: '#1976d2', // Blue
             width: 1.2,
             dash: 'dashdot'
@@ -1272,9 +1310,9 @@ function updatePriceHistoryChart() {
         hoverinfo: 'name+y'
     };
     
-    const val25Plus03Line = {
+    const val13Plus03Line = {
         x: xValues,
-        y: s.val25Plus03History,
+        y: s.val13Plus03History,
         mode: 'lines',
         name: '0.3%',
         line: {
@@ -1321,13 +1359,14 @@ function updatePriceHistoryChart() {
         data.push(breakevenTrace);
     }
     
-    data.push(val75Line, maxLine, avgLine, minLine, val25Line, val25Plus03Line);
+    data.push(val75Line, maxLine, avgLine, minLine, val25Line, val13Line, val13Plus03Line);
     
     let allValues = [...s.priceHistory];
     if (s.averageHistory.length > 0) allValues.push(...s.averageHistory);
     if (s.val75History.length > 0) allValues.push(...s.val75History);
     if (s.val25History.length > 0) allValues.push(...s.val25History);
-    if (s.val25Plus03History.length > 0) allValues.push(...s.val25Plus03History);
+    if (s.val13History.length > 0) allValues.push(...s.val13History);
+    if (s.val13Plus03History.length > 0) allValues.push(...s.val13Plus03History);
     if (s.tradeState === 'holding' && s.buyPrice > 0) {
         allValues.push(s.buyPrice);
         allValues.push(s.buyPrice * 1.003);

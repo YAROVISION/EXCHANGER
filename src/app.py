@@ -559,7 +559,7 @@ def bg_get_bot_state(user_id, symbol):
                     'usd_balance': 100.0,
                     'asset_balance': 0.0,
                     'trade_state': 'idle',
-                    'trade_sub_state': 'waiting_below_25',
+                    'trade_sub_state': 'waiting_below_13',
                     'buy_price': 0.0
                 }
                 supabase.table('bot_states').insert(initial_state).execute()
@@ -581,7 +581,7 @@ def bg_get_bot_state(user_id, symbol):
         'usd_balance': 100.0,
         'asset_balance': 0.0,
         'trade_state': 'idle',
-        'trade_sub_state': 'waiting_below_25',
+        'trade_sub_state': 'waiting_below_13',
         'buy_price': 0.0
     }
 
@@ -730,6 +730,7 @@ def run_bot_trading_strategy_on_server(user_id, symbol, current_price, ticks_lis
     diff = max_price - min_price
     val75 = min_price + 0.75 * diff
     val25 = min_price + 0.25 * diff
+    val13 = min_price + 0.13 * diff
     s = bg_get_bot_state(user_id, symbol)
     fee_rate = 0.001
     usd = float(s['usd_balance'])
@@ -739,9 +740,9 @@ def run_bot_trading_strategy_on_server(user_id, symbol, current_price, ticks_lis
     buy_price = float(s['buy_price'])
     state_changed = False
     if trade_state == 'idle':
-        if trade_sub_state != 'triggered_below_25':
-            if current_price <= val25:
-                trade_sub_state = 'triggered_below_25'
+        if trade_sub_state != 'triggered_below_13':
+            if current_price <= val13:
+                trade_sub_state = 'triggered_below_13'
                 state_changed = True
         else:
             if current_price >= val25:
@@ -763,6 +764,9 @@ def run_bot_trading_strategy_on_server(user_id, symbol, current_price, ticks_lis
                         'total': total_cost
                     }
                     bg_insert_bot_trade(user_id, symbol, trade_log)
+                else:
+                    trade_sub_state = 'waiting_below_13'
+                    state_changed = True
     elif trade_state == 'holding':
         if trade_sub_state == 'waiting_75':
             if current_price >= val75:
@@ -783,7 +787,7 @@ def run_bot_trading_strategy_on_server(user_id, symbol, current_price, ticks_lis
                         bg_insert_bot_trade(user_id, symbol, trade_log)
                         asset = 0.0
                         trade_state = 'idle'
-                        trade_sub_state = 'waiting_below_25'
+                        trade_sub_state = 'waiting_below_13'
                         buy_price = 0.0
                         state_changed = True
                     else:
@@ -806,7 +810,7 @@ def run_bot_trading_strategy_on_server(user_id, symbol, current_price, ticks_lis
                     bg_insert_bot_trade(user_id, symbol, trade_log)
                     asset = 0.0
                     trade_state = 'idle'
-                    trade_sub_state = 'waiting_below_25'
+                    trade_sub_state = 'waiting_below_13'
                     buy_price = 0.0
                     state_changed = True
     if state_changed:
@@ -1591,7 +1595,7 @@ def reset_bot_api():
         'usd_balance': 100.0,
         'asset_balance': 0.0,
         'trade_state': 'idle',
-        'trade_sub_state': 'waiting_below_25',
+        'trade_sub_state': 'waiting_below_13',
         'buy_price': 0.0
     }
     bg_save_bot_state(user_id, symbol, initial_state)

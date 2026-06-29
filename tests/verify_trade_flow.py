@@ -16,6 +16,13 @@ def test_trade_flow():
     with urllib.request.urlopen(login_url) as res:
         print("Login response:", res.read().decode())
 
+    # Step 1.5: Reset wallet
+    print("\n1.5. Resetting wallet to initial state...")
+    reset_url = "http://127.0.0.1:5000/api/exchange/reset"
+    req_reset = urllib.request.Request(reset_url, method='POST')
+    with urllib.request.urlopen(req_reset) as res:
+        print("Reset response:", res.read().decode())
+
     # Step 2: Fetch Wallet initially (should set fallback flag)
     print("\n2. Fetching initial wallet (triggers schema check)...")
     wallet_url = "http://127.0.0.1:5000/api/exchange/wallet"
