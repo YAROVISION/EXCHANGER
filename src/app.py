@@ -6,6 +6,8 @@ import urllib.error
 import datetime
 import threading
 import warnings
+import math
+from collections import deque
 from flask import Flask, request, jsonify, session
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -50,6 +52,52 @@ latest_prices = {
 local_ticks = []
 unsynced_ticks = []
 state_lock = threading.Lock()
+
+# Moving windows for regression analysis (last 25 ticks)
+btc_regression_window = deque(maxlen=25)
+eth_regression_window = deque(maxlen=25)
+
+latest_regression = {
+    "BTCUSDT": {"angle": 0.0, "signal": "НЕЙТРАЛЬНИЙ"},
+    "ETHUSDT": {"angle": 0.0, "signal": "НЕЙТРАЛЬНИЙ"}
+}
+
+def calculate_regression_angle(prices, tick_size=0.1):
+    """
+    Обчислює кут нахилу лінії тренду на основі лінійної регресії (МНК)
+    для останніх 25 тіків.
+    """
+    N = len(prices)
+    if N < 2:
+        return 0.0
+    
+    # Якщо довжина рівна 25, використовуємо оптимізовану формулу МНК з константним знаменником
+    if N == 25:
+        sum_y = sum(prices)
+        sum_xy = sum(i * p for i, p in enumerate(prices))
+        # slope = (N * sum(x*y) - sum(x)*sum(y)) / (N * sum(x^2) - sum(x)^2)
+        # Для N=25 та X=[0..24]: sum(x)=300, sum(x^2)=4900, Denom = 25*4900 - 300^2 = 32500
+        # З урахуванням Y = price / tick_size:
+        # slope = (25 * sum_xy / tick_size - 300 * sum_y / tick_size) / 32500
+        # slope = (sum_xy - 12 * sum_y) / (1300 * tick_size)
+        slope = (sum_xy - 12 * sum_y) / (1300.0 * tick_size)
+    else:
+        # Загальний випадок МНК для будь-якої іншої довжини N
+        sum_x = sum(range(N))
+        sum_x2 = sum(i ** 2 for i in range(N))
+        sum_y = sum(prices) / tick_size
+        sum_xy = sum(i * (p / tick_size) for i, p in enumerate(prices))
+        
+        denom = N * sum_x2 - sum_x ** 2
+        if denom == 0:
+            return 0.0
+        slope = (N * sum_xy - sum_x * sum_y) / denom
+
+    # arctan(slope) повертає кут в радіанах від -pi/2 до +pi/2, переводимо в градуси (-90 до +90)
+    angle_radians = math.atan(slope)
+    angle_degrees = math.degrees(angle_radians)
+    
+    return angle_degrees
 
 def sync_with_supabase():
     """Startup sync: download recent DB history and upload unsynced local ticks"""
@@ -150,6 +198,18 @@ def sync_with_supabase():
 
 # Run startup sync immediately before starting server threads
 sync_with_supabase()
+
+# Initialize regression windows from loaded history
+for t in local_ticks:
+    try:
+        p = float(t.get("price", 0.0))
+        if p > 0:
+            if t.get("symbol") == "BTCUSDT":
+                btc_regression_window.append(p)
+            elif t.get("symbol") == "ETHUSDT":
+                eth_regression_window.append(p)
+    except (ValueError, TypeError):
+        pass
 
 LIMIT_ORDERS_FILE = os.path.join(DATA_DIR, "limit_orders.json")
 BOT_STATE_FILE = os.path.join(DATA_DIR, "bot_state.json")
@@ -824,7 +884,7 @@ def run_bot_trading_strategy_on_server(user_id, symbol, current_price, ticks_lis
 def fetch_binance_prices_loop():
     """Background loop to fetch prices every 5s, save locally, run bot strategy & check limit orders, and sync to Supabase hourly"""
     loop_count = 0
-    global local_ticks, unsynced_ticks
+    global local_ticks, unsynced_ticks, latest_regression
     while True:
         try:
             # 1. Fetch BTC price
@@ -853,6 +913,11 @@ def fetch_binance_prices_loop():
             with state_lock:
                 local_ticks.append(new_btc)
                 local_ticks.append(new_eth)
+                
+                # Append to regression windows
+                btc_regression_window.append(btc_price)
+                eth_regression_window.append(eth_price)
+                
                 if TICK_SYNC_WRITE_ENABLED:
                     unsynced_ticks.append(new_btc)
                     unsynced_ticks.append(new_eth)
@@ -862,12 +927,38 @@ def fetch_binance_prices_loop():
                 eth_list = [t for t in local_ticks if t["symbol"] == "ETHUSDT"][-17280:]
                 local_ticks = btc_list + eth_list
                 
-                # Write to file
                 try:
                     with open(TICKS_FILE, 'w', encoding='utf-8') as f:
                         json.dump(local_ticks, f, indent=2)
                 except Exception as file_err:
                     print(f"Error saving local ticks: {file_err}")
+
+            # 2.2 Calculate regression angles and signals
+            with state_lock:
+                btc_window_list = list(btc_regression_window)
+                eth_window_list = list(eth_regression_window)
+
+            if len(btc_window_list) == 25:
+                btc_angle = calculate_regression_angle(btc_window_list, tick_size=0.1)
+                btc_sig = "НЕЙТРАЛЬНИЙ"
+                if btc_angle > 45:
+                    btc_sig = "ЛОНГ (LONG)"
+                    print(f"[{current_time}] [SIGNAL] BTCUSDT regression angle: {btc_angle:.2f}° -> ЛОНГ (LONG)")
+                elif btc_angle < -45:
+                    btc_sig = "ШОРТ (SHORT)"
+                    print(f"[{current_time}] [SIGNAL] BTCUSDT regression angle: {btc_angle:.2f}° -> ШОРТ (SHORT)")
+                latest_regression["BTCUSDT"] = {"angle": btc_angle, "signal": btc_sig}
+            
+            if len(eth_window_list) == 25:
+                eth_angle = calculate_regression_angle(eth_window_list, tick_size=0.1)
+                eth_sig = "НЕЙТРАЛЬНИЙ"
+                if eth_angle > 45:
+                    eth_sig = "ЛОНГ (LONG)"
+                    print(f"[{current_time}] [SIGNAL] ETHUSDT regression angle: {eth_angle:.2f}° -> ЛОНГ (LONG)")
+                elif eth_angle < -45:
+                    eth_sig = "ШОРТ (SHORT)"
+                    print(f"[{current_time}] [SIGNAL] ETHUSDT regression angle: {eth_angle:.2f}° -> ШОРТ (SHORT)")
+                latest_regression["ETHUSDT"] = {"angle": eth_angle, "signal": eth_sig}
 
             # 2.5 Run Background checks for Limit Orders & Bot Trading Strategies for all active users
             if btc_price > 0 and eth_price > 0:
@@ -1569,6 +1660,8 @@ def get_bot_state_api():
     trades = bg_get_bot_trades(user_id, symbol)
     window_size = get_bot_window_size(user_id, symbol)
     
+    reg = latest_regression.get(symbol, {"angle": 0.0, "signal": "НЕЙТРАЛЬНИЙ"})
+    
     return jsonify({
         'usd': float(s['usd_balance']),
         'asset': float(s['asset_balance']),
@@ -1576,7 +1669,9 @@ def get_bot_state_api():
         'tradeSubState': s['trade_sub_state'],
         'buyPrice': float(s['buy_price']),
         'trades': trades,
-        'window_size': window_size
+        'window_size': window_size,
+        'regression_angle': reg["angle"],
+        'regression_signal': reg["signal"]
     }), 200
 
 @app.route('/api/exchange/bot-reset', methods=['POST'])

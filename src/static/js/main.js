@@ -814,6 +814,8 @@ async function fetchBotState(asset) {
             s.tradeSubState = data.tradeSubState;
             s.buyPrice = data.buyPrice;
             s.trades = data.trades;
+            s.regressionAngle = data.regression_angle !== undefined ? data.regression_angle : 0.0;
+            s.regressionSignal = data.regression_signal || "НЕЙТРАЛЬНИЙ";
             state.botHistoryWindowSize = data.window_size;
             
             const sizeInput = document.getElementById('metrics-history-size');
@@ -1009,6 +1011,8 @@ function updateBotUI() {
     const pct13El = document.getElementById('metrics-price-13');
     const pct13DiffEl = document.getElementById('metrics-price-13-diff');
     const virtualProfitEl = document.getElementById('metrics-virtual-profit');
+    const angleEl = document.getElementById('metrics-regression-angle');
+    const signalEl = document.getElementById('metrics-regression-signal');
     
     const format = (val) => `$${val.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
     
@@ -1023,6 +1027,15 @@ function updateBotUI() {
         if (pct25DiffEl) pct25DiffEl.textContent = '-';
         if (pct13El) pct13El.textContent = '$-.--';
         if (pct13DiffEl) pct13DiffEl.textContent = '-';
+        if (angleEl) {
+            angleEl.textContent = '-.--°';
+            angleEl.style.color = 'var(--text-light)';
+        }
+        if (signalEl) {
+            signalEl.textContent = 'НЕЙТРАЛЬНИЙ';
+            signalEl.style.color = 'var(--text-light)';
+            signalEl.style.fontWeight = 'normal';
+        }
         if (virtualProfitEl) {
             virtualProfitEl.innerHTML = `$100.00 USD / 0.00000000 ${asset}<br><span style="font-size:10px; color:var(--coffee-light);">Накопичення історії (0/${state.botHistoryWindowSize})</span>`;
             virtualProfitEl.style.color = 'var(--text-light)';
@@ -1051,6 +1064,31 @@ function updateBotUI() {
     if (pct25DiffEl) pct25DiffEl.textContent = `25% від різниці: $${(0.25 * diff).toLocaleString(undefined, {maximumFractionDigits: 2})}`;
     if (pct13El) pct13El.textContent = format(val13);
     if (pct13DiffEl) pct13DiffEl.textContent = `13% від різниці: $${(0.13 * diff).toLocaleString(undefined, {maximumFractionDigits: 2})}`;
+    
+    if (angleEl && s.regressionAngle !== undefined) {
+        angleEl.textContent = `${s.regressionAngle >= 0 ? '+' : ''}${s.regressionAngle.toFixed(2)}°`;
+        if (s.regressionAngle > 45) {
+            angleEl.style.color = 'var(--color-success)';
+        } else if (s.regressionAngle < -45) {
+            angleEl.style.color = 'var(--color-danger)';
+        } else {
+            angleEl.style.color = 'var(--text-light)';
+        }
+    }
+    
+    if (signalEl && s.regressionSignal !== undefined) {
+        signalEl.textContent = s.regressionSignal;
+        if (s.regressionSignal.includes("ЛОНГ")) {
+            signalEl.style.color = 'var(--color-success)';
+            signalEl.style.fontWeight = 'bold';
+        } else if (s.regressionSignal.includes("ШОРТ")) {
+            signalEl.style.color = 'var(--color-danger)';
+            signalEl.style.fontWeight = 'bold';
+        } else {
+            signalEl.style.color = 'var(--text-light)';
+            signalEl.style.fontWeight = 'normal';
+        }
+    }
     
     // Virtual Profit Display
     const currentEquity = s.usd + (s.asset * currentPrice * 0.999);
