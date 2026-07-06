@@ -572,6 +572,10 @@ function initTabs() {
                 botTab.classList.remove('hidden');
                 fetchBotState(state.selectedAsset);
                 setTimeout(updatePriceHistoryChart, 50);
+                setTimeout(() => {
+                    const chartDiv = document.getElementById('metrics-history-chart');
+                    if (chartDiv) Plotly.Plots.resize(chartDiv);
+                }, 200);
             } else {
                 if (realHistorySection) realHistorySection.classList.remove('hidden');
                 if (botHistorySection) botHistorySection.classList.add('hidden');
@@ -1472,4 +1476,12 @@ function updatePriceHistoryChart() {
     };
     
     Plotly.react('metrics-history-chart', data, layout, config);
+    
+    // Force a resize calculation in the next frame to prevent the half-width render bug of Plotly when container transitions from display:none
+    setTimeout(() => {
+        const div = document.getElementById('metrics-history-chart');
+        if (div && div.clientWidth > 0) {
+            Plotly.Plots.resize(div);
+        }
+    }, 100);
 }
