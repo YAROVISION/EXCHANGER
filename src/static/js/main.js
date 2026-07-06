@@ -1414,6 +1414,18 @@ function updatePriceHistoryChart() {
     const yMaxVal = Math.max(...allValues);
     const pad = (yMaxVal - yMinVal) * 0.05 || 10;
     
+    let xaxisRange = [1, s.priceHistory.length + Math.max(1, s.priceHistory.length * 0.02)];
+    let yaxisRange = [yMinVal - pad, yMaxVal + pad];
+
+    if (chartDiv.layout) {
+        if (chartDiv.layout.xaxis && chartDiv.layout.xaxis.autorange === false) {
+            xaxisRange = chartDiv.layout.xaxis.range;
+        }
+        if (chartDiv.layout.yaxis && chartDiv.layout.yaxis.autorange === false) {
+            yaxisRange = chartDiv.layout.yaxis.range;
+        }
+    }
+    
     const layout = {
         margin: { t: 15, b: 60, l: 60, r: 15 },
         height: 318,
@@ -1430,7 +1442,7 @@ function updatePriceHistoryChart() {
         xaxis: {
             gridcolor: 'rgba(203, 178, 156, 0.1)',
             tickfont: { size: 8, color: '#F5EBE0' },
-            range: [1, s.priceHistory.length + Math.max(1, s.priceHistory.length * 0.02)],
+            range: xaxisRange,
             title: {
                 text: `Оновлення (останні ${s.priceHistory.length})`,
                 font: { size: 9, color: '#D5B99A' }
@@ -1439,7 +1451,7 @@ function updatePriceHistoryChart() {
         yaxis: {
             gridcolor: 'rgba(203, 178, 156, 0.1)',
             tickfont: { size: 8, color: '#F5EBE0' },
-            range: [yMinVal - pad, yMaxVal + pad],
+            range: yaxisRange,
             exponentformat: 'none',
             tickformat: '$,.2f'
         },
@@ -1448,7 +1460,9 @@ function updatePriceHistoryChart() {
     
     const config = {
         responsive: true,
-        displayModeBar: false
+        displayModeBar: true,
+        modeBarButtonsToRemove: ['toImage', 'sendDataToCloud'],
+        displaylogo: false
     };
     
     Plotly.react('metrics-history-chart', data, layout, config);

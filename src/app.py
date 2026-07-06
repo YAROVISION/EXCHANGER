@@ -53,9 +53,9 @@ local_ticks = []
 unsynced_ticks = []
 state_lock = threading.Lock()
 
-# Moving windows for regression analysis (last 25 ticks)
-btc_regression_window = deque(maxlen=25)
-eth_regression_window = deque(maxlen=25)
+# Moving windows for regression analysis (last 50 ticks)
+btc_regression_window = deque(maxlen=50)
+eth_regression_window = deque(maxlen=50)
 
 latest_regression = {
     "BTCUSDT": {"angle": 0.0, "signal": "НЕЙТРАЛЬНИЙ"},
@@ -65,22 +65,18 @@ latest_regression = {
 def calculate_regression_angle(prices, tick_size=0.1):
     """
     Обчислює кут нахилу лінії тренду на основі лінійної регресії (МНК)
-    для останніх 25 тіків.
+    для останніх 50 тіків.
     """
     N = len(prices)
     if N < 2:
         return 0.0
     
-    # Якщо довжина рівна 25, використовуємо оптимізовану формулу МНК з константним знаменником
-    if N == 25:
+    # Якщо довжина рівна 50, використовуємо оптимізовану формулу МНК з константним знаменником
+    if N == 50:
         sum_y = sum(prices)
         sum_xy = sum(i * p for i, p in enumerate(prices))
-        # slope = (N * sum(x*y) - sum(x)*sum(y)) / (N * sum(x^2) - sum(x)^2)
-        # Для N=25 та X=[0..24]: sum(x)=300, sum(x^2)=4900, Denom = 25*4900 - 300^2 = 32500
-        # З урахуванням Y = price / tick_size:
-        # slope = (25 * sum_xy / tick_size - 300 * sum_y / tick_size) / 32500
-        # slope = (sum_xy - 12 * sum_y) / (1300 * tick_size)
-        slope = (sum_xy - 12 * sum_y) / (1300.0 * tick_size)
+        # slope = (2 * sum_xy - 49 * sum_y) / (20825.0 * tick_size)
+        slope = (2 * sum_xy - 49.0 * sum_y) / (20825.0 * tick_size)
     else:
         # Загальний випадок МНК для будь-якої іншої довжини N
         sum_x = sum(range(N))
@@ -938,7 +934,7 @@ def fetch_binance_prices_loop():
                 btc_window_list = list(btc_regression_window)
                 eth_window_list = list(eth_regression_window)
 
-            if len(btc_window_list) == 25:
+            if len(btc_window_list) == 50:
                 btc_angle = calculate_regression_angle(btc_window_list, tick_size=0.1)
                 btc_sig = "НЕЙТРАЛЬНИЙ"
                 if btc_angle > 45:
@@ -949,7 +945,7 @@ def fetch_binance_prices_loop():
                     print(f"[{current_time}] [SIGNAL] BTCUSDT regression angle: {btc_angle:.2f}° -> ШОРТ (SHORT)")
                 latest_regression["BTCUSDT"] = {"angle": btc_angle, "signal": btc_sig}
             
-            if len(eth_window_list) == 25:
+            if len(eth_window_list) == 50:
                 eth_angle = calculate_regression_angle(eth_window_list, tick_size=0.1)
                 eth_sig = "НЕЙТРАЛЬНИЙ"
                 if eth_angle > 45:
