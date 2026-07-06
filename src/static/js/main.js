@@ -917,12 +917,18 @@ function runBotTradingStrategy(asset, currentPrice) {
     const feeRate = 0.001; 
     
     if (s.tradeState === 'idle') {
-        if (s.tradeSubState !== 'triggered_below_13') {
+        if (s.tradeSubState === 'deactivated_waiting_above_25') {
+            if (currentPrice >= val25) {
+                s.tradeSubState = 'waiting_below_13';
+            }
+        } else if (s.tradeSubState !== 'triggered_below_13') {
             if (currentPrice <= val13) {
                 s.tradeSubState = 'triggered_below_13';
             }
         } else {
-            if (currentPrice >= val25) {
+            if (currentPrice <= minPrice) {
+                s.tradeSubState = 'deactivated_waiting_above_25';
+            } else if (currentPrice >= val25) {
                 if (s.usd > 0) {
                     const totalCost = s.usd;
                     s.asset = totalCost / (currentPrice * (1 + feeRate));
@@ -1133,6 +1139,8 @@ function updateBotUI() {
         } else {
             if (s.tradeSubState === 'triggered_below_13') {
                 text += ` | <span style="color:var(--color-success); font-weight:bold;">Клапан активовано (купівля при ≥ $${val25.toLocaleString(undefined, {maximumFractionDigits: 2})})</span>`;
+            } else if (s.tradeSubState === 'deactivated_waiting_above_25') {
+                text += ` | <span style="color:var(--color-danger); font-weight:bold;">Клапан деактивовано (очікування підйому ≥ $${val25.toLocaleString(undefined, {maximumFractionDigits: 2})})</span>`;
             } else {
                 text += ` | Очікування падіння нижче $${val13.toLocaleString(undefined, {maximumFractionDigits: 2})}`;
             }

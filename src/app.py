@@ -796,12 +796,19 @@ def run_bot_trading_strategy_on_server(user_id, symbol, current_price, ticks_lis
     buy_price = float(s['buy_price'])
     state_changed = False
     if trade_state == 'idle':
-        if trade_sub_state != 'triggered_below_13':
+        if trade_sub_state == 'deactivated_waiting_above_25':
+            if current_price >= val25:
+                trade_sub_state = 'waiting_below_13'
+                state_changed = True
+        elif trade_sub_state != 'triggered_below_13':
             if current_price <= val13:
                 trade_sub_state = 'triggered_below_13'
                 state_changed = True
         else:
-            if current_price >= val25:
+            if current_price <= min_price:
+                trade_sub_state = 'deactivated_waiting_above_25'
+                state_changed = True
+            elif current_price >= val25:
                 if usd > 0:
                     total_cost = usd
                     asset = total_cost / (current_price * (1.0 + fee_rate))
