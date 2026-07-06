@@ -1476,12 +1476,4 @@ function updatePriceHistoryChart() {
     };
     
     Plotly.react('metrics-history-chart', data, layout, config);
-    
-    // Force a resize calculation in the next frame to prevent the half-width render bug of Plotly when container transitions from display:none
-    setTimeout(() => {
-        const div = document.getElementById('metrics-history-chart');
-        if (div && div.clientWidth > 0) {
-            Plotly.Plots.resize(div);
-        }
-    }, 100);
 }
