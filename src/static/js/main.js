@@ -1414,19 +1414,8 @@ function updatePriceHistoryChart() {
     const yMaxVal = Math.max(...allValues);
     const pad = (yMaxVal - yMinVal) * 0.05 || 10;
     
-    let xaxisRange = [1, s.priceHistory.length + Math.max(1, s.priceHistory.length * 0.02)];
-    let yaxisRange = [yMinVal - pad, yMaxVal + pad];
-
-    if (chartDiv.layout) {
-        if (chartDiv.layout.xaxis && chartDiv.layout.xaxis.autorange === false) {
-            xaxisRange = chartDiv.layout.xaxis.range;
-        }
-        if (chartDiv.layout.yaxis && chartDiv.layout.yaxis.autorange === false) {
-            yaxisRange = chartDiv.layout.yaxis.range;
-        }
-    }
-    
     const layout = {
+        uirevision: state.selectedAsset, // Preserves zoom and pan state during real-time updates
         margin: { t: 15, b: 60, l: 60, r: 15 },
         height: 318,
         paper_bgcolor: 'rgba(0,0,0,0)',
@@ -1442,7 +1431,7 @@ function updatePriceHistoryChart() {
         xaxis: {
             gridcolor: 'rgba(203, 178, 156, 0.1)',
             tickfont: { size: 8, color: '#F5EBE0' },
-            range: xaxisRange,
+            range: [1, s.priceHistory.length + Math.max(1, s.priceHistory.length * 0.02)],
             title: {
                 text: `Оновлення (останні ${s.priceHistory.length})`,
                 font: { size: 9, color: '#D5B99A' }
@@ -1451,7 +1440,7 @@ function updatePriceHistoryChart() {
         yaxis: {
             gridcolor: 'rgba(203, 178, 156, 0.1)',
             tickfont: { size: 8, color: '#F5EBE0' },
-            range: yaxisRange,
+            range: [yMinVal - pad, yMaxVal + pad],
             exponentformat: 'none',
             tickformat: '$,.2f'
         },
