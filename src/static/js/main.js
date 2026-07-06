@@ -1013,6 +1013,7 @@ function updateBotUI() {
     const virtualProfitEl = document.getElementById('metrics-virtual-profit');
     const angleEl = document.getElementById('metrics-regression-angle');
     const signalEl = document.getElementById('metrics-regression-signal');
+    const arrowEl = document.getElementById('regression-angle-arrow');
     
     const format = (val) => `$${val.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
     
@@ -1030,6 +1031,10 @@ function updateBotUI() {
         if (angleEl) {
             angleEl.textContent = '-.--°';
             angleEl.style.color = 'var(--text-light)';
+        }
+        if (arrowEl) {
+            arrowEl.style.transform = 'rotate(0deg)';
+            arrowEl.style.color = 'var(--text-light)';
         }
         if (signalEl) {
             signalEl.textContent = 'НЕЙТРАЛЬНИЙ';
@@ -1073,6 +1078,18 @@ function updateBotUI() {
             angleEl.style.color = 'var(--color-danger)';
         } else {
             angleEl.style.color = 'var(--text-light)';
+        }
+    }
+    
+    if (arrowEl && s.regressionAngle !== undefined) {
+        // Rotate arrow by -angle degrees (since CSS rotation is clockwise and mathematical is counter-clockwise)
+        arrowEl.style.transform = `rotate(${-s.regressionAngle}deg)`;
+        if (s.regressionAngle > 45) {
+            arrowEl.style.color = 'var(--color-success)';
+        } else if (s.regressionAngle < -45) {
+            arrowEl.style.color = 'var(--color-danger)';
+        } else {
+            arrowEl.style.color = '#D5B99A'; // var(--coffee-light)
         }
     }
     
