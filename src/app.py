@@ -784,6 +784,7 @@ def run_bot_trading_strategy_on_server(user_id, symbol, current_price, ticks_lis
     if max_price <= min_price:
         return
     diff = max_price - min_price
+    val87 = min_price + 0.87 * diff
     val75 = min_price + 0.75 * diff
     val25 = min_price + 0.25 * diff
     val13 = min_price + 0.13 * diff
@@ -815,7 +816,7 @@ def run_bot_trading_strategy_on_server(user_id, symbol, current_price, ticks_lis
                     fee = asset * current_price * fee_rate
                     usd = 0.0
                     trade_state = 'holding'
-                    trade_sub_state = 'waiting_75'
+                    trade_sub_state = 'waiting_75_rising'
                     buy_price = current_price
                     state_changed = True
                     trade_log = {
@@ -831,31 +832,67 @@ def run_bot_trading_strategy_on_server(user_id, symbol, current_price, ticks_lis
                     trade_sub_state = 'waiting_below_13'
                     state_changed = True
     elif trade_state == 'holding':
-        if trade_sub_state == 'waiting_75':
+        if trade_sub_state in ('waiting_75', 'waiting_75_rising'):
             if current_price >= val75:
                 if asset > 0:
                     estimated_revenue = asset * current_price * (1.0 - fee_rate)
                     cost_of_purchase = asset * buy_price * (1.0 + fee_rate)
                     if estimated_revenue > cost_of_purchase:
-                        usd = estimated_revenue
-                        fee = asset * current_price * fee_rate
-                        trade_log = {
-                            'type': 'sell',
-                            'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
-                            'amount': asset,
-                            'price': current_price,
-                            'fee': fee,
-                            'total': estimated_revenue
-                        }
-                        bg_insert_bot_trade(user_id, symbol, trade_log)
-                        asset = 0.0
-                        trade_state = 'idle'
-                        trade_sub_state = 'waiting_below_13'
-                        buy_price = 0.0
+                        trade_sub_state = 'waiting_75_falling'
                         state_changed = True
                     else:
                         trade_sub_state = 'waiting_breakeven'
                         state_changed = True
+        elif trade_sub_state == 'waiting_75_falling':
+            if current_price < val75:
+                if asset > 0:
+                    estimated_revenue = asset * current_price * (1.0 - fee_rate)
+                    usd = estimated_revenue
+                    fee = asset * current_price * fee_rate
+                    trade_log = {
+                        'type': 'sell',
+                        'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+                        'amount': asset,
+                        'price': current_price,
+                        'fee': fee,
+                        'total': estimated_revenue
+                    }
+                    bg_insert_bot_trade(user_id, symbol, trade_log)
+                    asset = 0.0
+                    trade_state = 'idle'
+                    trade_sub_state = 'waiting_below_13'
+                    buy_price = 0.0
+                    state_changed = True
+            elif current_price >= val87:
+                if asset > 0:
+                    estimated_revenue = asset * current_price * (1.0 - fee_rate)
+                    cost_of_purchase = asset * buy_price * (1.0 + fee_rate)
+                    if estimated_revenue > cost_of_purchase:
+                        trade_sub_state = 'waiting_87_falling'
+                        state_changed = True
+                    else:
+                        trade_sub_state = 'waiting_breakeven'
+                        state_changed = True
+        elif trade_sub_state == 'waiting_87_falling':
+            if current_price < val87:
+                if asset > 0:
+                    estimated_revenue = asset * current_price * (1.0 - fee_rate)
+                    usd = estimated_revenue
+                    fee = asset * current_price * fee_rate
+                    trade_log = {
+                        'type': 'sell',
+                        'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+                        'amount': asset,
+                        'price': current_price,
+                        'fee': fee,
+                        'total': estimated_revenue
+                    }
+                    bg_insert_bot_trade(user_id, symbol, trade_log)
+                    asset = 0.0
+                    trade_state = 'idle'
+                    trade_sub_state = 'waiting_below_13'
+                    buy_price = 0.0
+                    state_changed = True
         elif trade_sub_state == 'waiting_breakeven':
             if current_price >= buy_price * 1.003:
                 if asset > 0:

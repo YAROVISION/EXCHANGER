@@ -24,6 +24,7 @@ let state = {
             trades: [],
             priceHistory: [],
             averageHistory: [],
+            val87History: [],
             val75History: [],
             val25History: [],
             val13History: [],
@@ -38,6 +39,7 @@ let state = {
             trades: [],
             priceHistory: [],
             averageHistory: [],
+            val87History: [],
             val75History: [],
             val25History: [],
             val13History: [],
@@ -480,9 +482,15 @@ async function updatePricesAndTriggers() {
             const max = Math.max(...s.priceHistory);
             const min = Math.min(...s.priceHistory);
             const diff = max - min;
+            const val87 = min + 0.87 * diff;
             const val75 = min + 0.75 * diff;
             const val25 = min + 0.25 * diff;
             const val13 = min + 0.13 * diff;
+            
+            s.val87History.push(val87);
+            while (s.val87History.length > state.botHistoryWindowSize) {
+                s.val87History.shift();
+            }
             
             s.val75History.push(val75);
             while (s.val75History.length > state.botHistoryWindowSize) {
@@ -873,6 +881,7 @@ async function handleDatabaseSizeChange(size) {
 function recalculateAssetMetrics(asset) {
     let s = state.botState[asset];
     s.averageHistory = [];
+    s.val87History = [];
     s.val75History = [];
     s.val25History = [];
     s.val13History = [];
@@ -889,10 +898,12 @@ function recalculateAssetMetrics(asset) {
         const max = Math.max(...windowPrices);
         const min = Math.min(...windowPrices);
         const diff = max - min;
+        const val87 = min + 0.87 * diff;
         const val75 = min + 0.75 * diff;
         const val25 = min + 0.25 * diff;
         const val13 = min + 0.13 * diff;
         
+        s.val87History.push(val87);
         s.val75History.push(val75);
         s.val25History.push(val25);
         s.val13History.push(val13);
@@ -910,6 +921,7 @@ function runBotTradingStrategy(asset, currentPrice) {
     const minPrice = Math.min(...s.priceHistory);
     if (maxPrice <= minPrice) return;
     const diff = maxPrice - minPrice;
+    const val87 = minPrice + 0.87 * diff;
     const val75 = minPrice + 0.75 * diff;
     const val25 = minPrice + 0.25 * diff;
     const val13 = minPrice + 0.13 * diff;
@@ -935,7 +947,7 @@ function runBotTradingStrategy(asset, currentPrice) {
                     const fee = s.asset * currentPrice * feeRate;
                     s.usd = 0;
                     s.tradeState = 'holding';
-                    s.tradeSubState = 'waiting_75';
+                    s.tradeSubState = 'waiting_75_rising';
                     s.buyPrice = currentPrice;
                     
                     s.trades.unshift({
@@ -952,31 +964,70 @@ function runBotTradingStrategy(asset, currentPrice) {
             }
         }
     } else if (s.tradeState === 'holding') {
-        if (s.tradeSubState === 'waiting_75') {
+        if (s.tradeSubState === 'waiting_75' || s.tradeSubState === 'waiting_75_rising') {
             if (currentPrice >= val75) {
                 if (s.asset > 0) {
                     const estimatedRevenue = s.asset * currentPrice * (1 - feeRate);
                     const costOfPurchase = s.asset * s.buyPrice * (1 + feeRate);
                     if (estimatedRevenue > costOfPurchase) {
-                        s.usd = estimatedRevenue;
-                        const fee = s.asset * currentPrice * feeRate;
-                        
-                        s.trades.unshift({
-                            type: 'sell',
-                            timestamp: new Date().toISOString(),
-                            amount: s.asset,
-                            price: currentPrice,
-                            fee: fee,
-                            total: estimatedRevenue
-                        });
-                        
-                        s.asset = 0;
-                        s.tradeState = 'idle';
-                        s.tradeSubState = 'waiting_below_13';
-                        s.buyPrice = 0;
+                        s.tradeSubState = 'waiting_75_falling';
                     } else {
                         s.tradeSubState = 'waiting_breakeven';
                     }
+                }
+            }
+        } else if (s.tradeSubState === 'waiting_75_falling') {
+            if (currentPrice < val75) {
+                if (s.asset > 0) {
+                    const estimatedRevenue = s.asset * currentPrice * (1 - feeRate);
+                    s.usd = estimatedRevenue;
+                    const fee = s.asset * currentPrice * feeRate;
+                    
+                    s.trades.unshift({
+                        type: 'sell',
+                        timestamp: new Date().toISOString(),
+                        amount: s.asset,
+                        price: currentPrice,
+                        fee: fee,
+                        total: estimatedRevenue
+                    });
+                    
+                    s.asset = 0;
+                    s.tradeState = 'idle';
+                    s.tradeSubState = 'waiting_below_13';
+                    s.buyPrice = 0;
+                }
+            } else if (currentPrice >= val87) {
+                if (s.asset > 0) {
+                    const estimatedRevenue = s.asset * currentPrice * (1 - feeRate);
+                    const costOfPurchase = s.asset * s.buyPrice * (1 + feeRate);
+                    if (estimatedRevenue > costOfPurchase) {
+                        s.tradeSubState = 'waiting_87_falling';
+                    } else {
+                        s.tradeSubState = 'waiting_breakeven';
+                    }
+                }
+            }
+        } else if (s.tradeSubState === 'waiting_87_falling') {
+            if (currentPrice < val87) {
+                if (s.asset > 0) {
+                    const estimatedRevenue = s.asset * currentPrice * (1 - feeRate);
+                    s.usd = estimatedRevenue;
+                    const fee = s.asset * currentPrice * feeRate;
+                    
+                    s.trades.unshift({
+                        type: 'sell',
+                        timestamp: new Date().toISOString(),
+                        amount: s.asset,
+                        price: currentPrice,
+                        fee: fee,
+                        total: estimatedRevenue
+                    });
+                    
+                    s.asset = 0;
+                    s.tradeState = 'idle';
+                    s.tradeSubState = 'waiting_below_13';
+                    s.buyPrice = 0;
                 }
             }
         } else if (s.tradeSubState === 'waiting_breakeven') {
@@ -1131,8 +1182,14 @@ function updateBotUI() {
             text += ` | Вхід: $${s.buyPrice.toLocaleString()}`;
             if (s.tradeSubState === 'waiting_breakeven') {
                 text += ` | <span style="color:var(--color-danger); font-weight:bold;">Беззбиток (≥ $${(s.buyPrice * 1.003).toLocaleString(undefined, {maximumFractionDigits: 2})})</span>`;
-            } else {
-                text += ` | Ціль (≥ $${val75.toLocaleString(undefined, {maximumFractionDigits: 2})})`;
+            } else if (s.tradeSubState === 'waiting_75_rising' || s.tradeSubState === 'waiting_75') {
+                text += ` | Ціль: Ріст ≥ 75% ($${val75.toLocaleString(undefined, {maximumFractionDigits: 2})})`;
+            } else if (s.tradeSubState === 'waiting_75_falling') {
+                const val87 = minPrice + 0.87 * diff;
+                text += ` | <span style="color:var(--color-success); font-weight:bold;">Клапан 75% АКТИВОВАНО</span> (Спад < $${val75.toLocaleString(undefined, {maximumFractionDigits: 2})} або Ріст ≥ $${val87.toLocaleString(undefined, {maximumFractionDigits: 2})})`;
+            } else if (s.tradeSubState === 'waiting_87_falling') {
+                const val87 = minPrice + 0.87 * diff;
+                text += ` | <span style="color:var(--color-success); font-weight:bold;">Клапан 87% АКТИВОВАНО</span> (Спад < $${val87.toLocaleString(undefined, {maximumFractionDigits: 2})})`;
             }
         } else if (s.priceHistory.length < state.botHistoryWindowSize) {
             text += ` | Накопичення (${s.priceHistory.length}/${state.botHistoryWindowSize})`;
@@ -1258,6 +1315,7 @@ function updatePriceHistoryChart() {
     const avgPrice = s.priceHistory.reduce((a, b) => a + b, 0) / s.priceHistory.length;
     const diff = maxPrice - minPrice;
     
+    const val87 = minPrice + 0.87 * diff;
     const val75 = minPrice + 0.75 * diff;
     const val25 = minPrice + 0.25 * diff;
     const val13 = minPrice + 0.13 * diff;
@@ -1293,6 +1351,19 @@ function updatePriceHistoryChart() {
             }
         },
         hoverinfo: 'y'
+    };
+    
+    const val87Line = {
+        x: xValues,
+        y: s.val87History,
+        mode: 'lines',
+        name: '87% Рівень',
+        line: {
+            color: '#d32f2f', // Red
+            width: 1.2,
+            dash: 'dashdot'
+        },
+        hoverinfo: 'name+y'
     };
     
     const val75Line = {
@@ -1426,10 +1497,11 @@ function updatePriceHistoryChart() {
         data.push(breakevenTrace);
     }
     
-    data.push(val75Line, maxLine, avgLine, minLine, val25Line, val13Line, val13Plus03Line);
+    data.push(val87Line, val75Line, maxLine, avgLine, minLine, val25Line, val13Line, val13Plus03Line);
     
     let allValues = [...s.priceHistory];
     if (s.averageHistory.length > 0) allValues.push(...s.averageHistory);
+    if (s.val87History.length > 0) allValues.push(...s.val87History);
     if (s.val75History.length > 0) allValues.push(...s.val75History);
     if (s.val25History.length > 0) allValues.push(...s.val25History);
     if (s.val13History.length > 0) allValues.push(...s.val13History);
