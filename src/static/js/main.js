@@ -506,67 +506,80 @@ async function updatePricesAndTriggers() {
     await fetchPrices();
     
     // Update bot histories and run strategy on every price tick (5s)
-    ['BTC', 'ETH'].forEach(asset => {
+    for (const asset of ['BTC', 'ETH']) {
         let currentPrice = state.prices[asset];
         if (currentPrice > 0) {
             let s = state.botState[asset];
-            s.priceHistory.push(currentPrice);
-            while (s.priceHistory.length > state.botHistoryWindowSize) {
-                s.priceHistory.shift();
+            
+            // Check if we need to reload ticks history from Supabase
+            let needReload = false;
+            if (!s.fullHistory || s.fullHistory.length === 0) {
+                needReload = true;
+            } else {
+                const max24h = Math.max(...s.fullHistory);
+                const min24h = Math.min(...s.fullHistory);
+                if (currentPrice > max24h || currentPrice < min24h) {
+                    needReload = true;
+                }
             }
             
-            if (!s.fullHistory) {
-                s.fullHistory = [];
+            if (needReload) {
+                console.log(`[INFO] Reloading ticks history from Supabase for ${asset} (price broke min/max range or first load)`);
+                await fetchTicksHistoryFor(asset);
+            } else {
+                s.priceHistory.push(currentPrice);
+                while (s.priceHistory.length > state.botHistoryWindowSize) {
+                    s.priceHistory.shift();
+                }
+                
+                s.fullHistory.push(currentPrice);
+                while (s.fullHistory.length > 17280) {
+                    s.fullHistory.shift();
+                }
+                
+                // Calculate current average, 75%, 13%, etc., and append to histories
+                const sum = s.priceHistory.reduce((a, b) => a + b, 0);
+                const avg = sum / s.priceHistory.length;
+                s.averageHistory.push(avg);
+                while (s.averageHistory.length > state.botHistoryWindowSize) {
+                    s.averageHistory.shift();
+                }
+                
+                const max = Math.max(...s.priceHistory);
+                const min = Math.min(...s.priceHistory);
+                const diff = max - min;
+                const val87 = min + 0.87 * diff;
+                const val75 = min + 0.75 * diff;
+                const val25 = min + 0.25 * diff;
+                const val13 = min + 0.13 * diff;
+                
+                s.val87History.push(val87);
+                while (s.val87History.length > state.botHistoryWindowSize) {
+                    s.val87History.shift();
+                }
+                
+                s.val75History.push(val75);
+                while (s.val75History.length > state.botHistoryWindowSize) {
+                    s.val75History.shift();
+                }
+                
+                s.val25History.push(val25);
+                while (s.val25History.length > state.botHistoryWindowSize) {
+                    s.val25History.shift();
+                }
+                
+                s.val13History.push(val13);
+                while (s.val13History.length > state.botHistoryWindowSize) {
+                    s.val13History.shift();
+                }
+                
+                s.val13Plus03History.push(val13 * 1.003);
+                while (s.val13Plus03History.length > state.botHistoryWindowSize) {
+                    s.val13Plus03History.shift();
+                }
             }
-            s.fullHistory.push(currentPrice);
-            while (s.fullHistory.length > 17280) {
-                s.fullHistory.shift();
-            }
-            
-            // Calculate current average, 75%, 13%, etc., and append to histories
-            const sum = s.priceHistory.reduce((a, b) => a + b, 0);
-            const avg = sum / s.priceHistory.length;
-            s.averageHistory.push(avg);
-            while (s.averageHistory.length > state.botHistoryWindowSize) {
-                s.averageHistory.shift();
-            }
-            
-            const max = Math.max(...s.priceHistory);
-            const min = Math.min(...s.priceHistory);
-            const diff = max - min;
-            const val87 = min + 0.87 * diff;
-            const val75 = min + 0.75 * diff;
-            const val25 = min + 0.25 * diff;
-            const val13 = min + 0.13 * diff;
-            
-            s.val87History.push(val87);
-            while (s.val87History.length > state.botHistoryWindowSize) {
-                s.val87History.shift();
-            }
-            
-            s.val75History.push(val75);
-            while (s.val75History.length > state.botHistoryWindowSize) {
-                s.val75History.shift();
-            }
-            
-            s.val25History.push(val25);
-            while (s.val25History.length > state.botHistoryWindowSize) {
-                s.val25History.shift();
-            }
-            
-            s.val13History.push(val13);
-            while (s.val13History.length > state.botHistoryWindowSize) {
-                s.val13History.shift();
-            }
-            
-            s.val13Plus03History.push(val13 * 1.003);
-            while (s.val13Plus03History.length > state.botHistoryWindowSize) {
-                s.val13Plus03History.shift();
-            }
-            
-            // runBotTradingStrategy is now executed on the backend server for background processing
         }
-    });
+    }
     
     updateBuyButtonsState();
     

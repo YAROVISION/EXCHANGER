@@ -1804,14 +1804,23 @@ def get_ticks_history():
     if symbol not in ['BTCUSDT', 'ETHUSDT']:
         return jsonify({'error': 'Invalid symbol'}), 400
         
-    with state_lock:
-        symbol_ticks = [float(t['price']) for t in local_ticks if t.get('symbol') == symbol]
-        db_size = 17280
-        
+    symbol_ticks = []
+    if supabase and not is_fallback_mode():
+        try:
+            res = supabase.table('crypto_ticks').select('price').eq('symbol', symbol).order('created_at', desc=True).limit(17280).execute()
+            db_ticks = getattr(res, 'data', [])
+            symbol_ticks = [float(t['price']) for t in reversed(db_ticks)]
+        except Exception as e:
+            print(f"Error fetching ticks from Supabase: {str(e)}")
+            
+    if not symbol_ticks:
+        with state_lock:
+            symbol_ticks = [float(t['price']) for t in local_ticks if t.get('symbol') == symbol]
+            
     return jsonify({
         'success': True,
         'ticks': symbol_ticks,
-        'tick_database_size': db_size
+        'tick_database_size': 17280
     }), 200
 
 @app.route('/api/exchange/tick-database-size', methods=['POST'])
