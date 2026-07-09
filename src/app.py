@@ -1294,6 +1294,33 @@ def exchange_history():
     # Fallback to local persistent trades
     return jsonify(load_local_trades(user_id)), 200
 
+def is_in_sell_zone(symbol):
+    """
+    Checks if the latest price of the symbol is in the 24h sell zone (>= avg_24h).
+    """
+    global local_ticks
+    with state_lock:
+        symbol_ticks = [float(t['price']) for t in local_ticks if t.get('symbol') == symbol]
+    
+    if not symbol_ticks:
+        return False
+        
+    max_24h = max(symbol_ticks)
+    min_24h = min(symbol_ticks)
+    avg_24h = (max_24h + min_24h) / 2.0
+    
+    # Get current price
+    current_price = 0.0
+    if symbol == 'BTCUSDT':
+        current_price = latest_prices.get('BTC', 0.0)
+    elif symbol == 'ETHUSDT':
+        current_price = latest_prices.get('ETH', 0.0)
+        
+    if current_price <= 0.0:
+        return False
+        
+    return current_price >= avg_24h
+
 @app.route('/api/exchange/trade', methods=['POST'])
 @login_required
 def exchange_trade():
@@ -1315,6 +1342,9 @@ def exchange_trade():
         
     if btc_amount <= 0 or price <= 0:
         return jsonify({'error': 'Amount and price must be greater than zero'}), 400
+
+    if trade_type == 'buy' and is_in_sell_zone(symbol):
+        return jsonify({'error': 'Купівля заборонена: поточний курс перебуває в зоні продажу'}), 400
 
     fee_rate = 0.001  # 0.1% fee
     fee = btc_amount * price * fee_rate
@@ -1540,6 +1570,9 @@ def place_limit_order():
 
     if usd_amount <= 0 or btc_amount <= 0 or price <= 0:
         return jsonify({'error': 'Values must be positive'}), 400
+
+    if order_type == 'buy' and is_in_sell_zone(symbol):
+        return jsonify({'error': 'Купівля заборонена: поточний курс перебуває в зоні продажу'}), 400
 
     fee_rate = 0.001
     fee = btc_amount * price * fee_rate

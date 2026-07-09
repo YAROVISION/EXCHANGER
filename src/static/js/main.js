@@ -352,6 +352,46 @@ function updateFutureTargetsUI() {
     }
 }
 
+function isInSellZone(asset) {
+    const s = state.botState[asset];
+    if (!s || !s.fullHistory || s.fullHistory.length === 0) return false;
+    const max24h = Math.max(...s.fullHistory);
+    const min24h = Math.min(...s.fullHistory);
+    const avg24h = (max24h + min24h) / 2;
+    const currentPrice = state.prices[asset] || (s.priceHistory && s.priceHistory.length > 0 ? s.priceHistory[s.priceHistory.length - 1] : 0);
+    return currentPrice >= avg24h;
+}
+
+function updateBuyButtonsState() {
+    const asset = state.selectedAsset;
+    const isBlocked = isInSellZone(asset);
+    
+    const mBtn = document.getElementById('market-buy-btn');
+    const lBtn = document.getElementById('limit-buy-btn');
+    
+    if (mBtn) {
+        mBtn.disabled = isBlocked;
+        if (isBlocked) {
+            mBtn.textContent = `КУПИТИ ${asset} (БЛОК)`;
+            mBtn.title = "Купівля заборонена: ціна знаходиться в зоні продажу";
+        } else {
+            mBtn.textContent = `КУПИТИ ${asset}`;
+            mBtn.title = "";
+        }
+    }
+    
+    if (lBtn) {
+        lBtn.disabled = isBlocked;
+        if (isBlocked) {
+            lBtn.textContent = `КУПИТИ ${asset} (БЛОК)`;
+            lBtn.title = "Купівля заборонена: ціна знаходиться в зоні продажу";
+        } else {
+            lBtn.textContent = `КУПИТИ ${asset}`;
+            lBtn.title = "";
+        }
+    }
+}
+
 function updateFormLabels() {
     const asset = state.selectedAsset;
     
@@ -379,6 +419,8 @@ function updateFormLabels() {
     if (limitAmountLabel) {
         limitAmountLabel.textContent = `Кількість (${asset})`;
     }
+    
+    updateBuyButtonsState();
 }
 
 function updateTickerItem(element, currentPrice, prevPrice) {
@@ -526,6 +568,8 @@ async function updatePricesAndTriggers() {
         }
     });
     
+    updateBuyButtonsState();
+    
     if (state.activeTab === 'bot') {
         await fetchBotState(state.selectedAsset);
     }
@@ -642,6 +686,11 @@ async function executeMarketTrade(type) {
     const price = state.prices[asset];
     const symbol = asset === 'BTC' ? 'BTCUSDT' : 'ETHUSDT';
     
+    if (type === 'buy' && isInSellZone(asset)) {
+        alert("Купівля заборонена: поточний курс перебуває в зоні продажу за останню добу.");
+        return;
+    }
+    
     if (isNaN(amount) || amount <= 0) {
         alert(`Введіть коректну кількість ${asset}`);
         return;
@@ -671,6 +720,11 @@ async function executeLimitOrder(type) {
     const amount = parseFloat(limitAmountInput.value);
     const asset = state.selectedAsset;
     const symbol = asset === 'BTC' ? 'BTCUSDT' : 'ETHUSDT';
+    
+    if (type === 'buy' && isInSellZone(asset)) {
+        alert("Купівля заборонена: поточний курс перебуває в зоні продажу за останню добу.");
+        return;
+    }
     
     if (isNaN(price) || price <= 0) {
         alert("Введіть коректну лімітну ціну");
