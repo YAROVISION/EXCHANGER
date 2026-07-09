@@ -1297,11 +1297,29 @@ def exchange_history():
 def is_in_sell_zone(symbol):
     """
     Checks if the latest price of the symbol is in the 24h sell zone (>= avg_24h).
+    Calculated using Supabase database with 24-hour time constraint.
     """
     global local_ticks
-    with state_lock:
-        symbol_ticks = [float(t['price']) for t in local_ticks if t.get('symbol') == symbol]
+    symbol_ticks = []
     
+    limit_dt = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=24)
+    limit_time = limit_dt.isoformat()
+    
+    if supabase and not is_fallback_mode():
+        try:
+            res = supabase.table('crypto_ticks').select('price').eq('symbol', symbol).gte('created_at', limit_time).order('created_at', desc=True).limit(17280).execute()
+            db_ticks = getattr(res, 'data', [])
+            symbol_ticks = [float(t['price']) for t in db_ticks]
+        except Exception as e:
+            print(f"Error fetching ticks from Supabase for is_in_sell_zone: {e}")
+            
+    if not symbol_ticks:
+        with state_lock:
+            symbol_ticks = [
+                float(t['price']) for t in local_ticks 
+                if t.get('symbol') == symbol and datetime.datetime.fromisoformat(t.get('created_at').replace('Z', '+00:00')) >= limit_dt
+            ]
+            
     if not symbol_ticks:
         return False
         
@@ -1805,9 +1823,12 @@ def get_ticks_history():
         return jsonify({'error': 'Invalid symbol'}), 400
         
     symbol_ticks = []
+    limit_dt = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=24)
+    limit_time = limit_dt.isoformat()
+    
     if supabase and not is_fallback_mode():
         try:
-            res = supabase.table('crypto_ticks').select('price').eq('symbol', symbol).order('created_at', desc=True).limit(17280).execute()
+            res = supabase.table('crypto_ticks').select('price').eq('symbol', symbol).gte('created_at', limit_time).order('created_at', desc=True).limit(17280).execute()
             db_ticks = getattr(res, 'data', [])
             symbol_ticks = [float(t['price']) for t in reversed(db_ticks)]
         except Exception as e:
@@ -1815,7 +1836,10 @@ def get_ticks_history():
             
     if not symbol_ticks:
         with state_lock:
-            symbol_ticks = [float(t['price']) for t in local_ticks if t.get('symbol') == symbol]
+            symbol_ticks = [
+                float(t['price']) for t in local_ticks 
+                if t.get('symbol') == symbol and datetime.datetime.fromisoformat(t.get('created_at').replace('Z', '+00:00')) >= limit_dt
+            ]
             
     return jsonify({
         'success': True,
