@@ -1182,6 +1182,46 @@ body {
     gap: 0.6rem;
 }
 
+/* Bot Controls Grid */
+.bot-controls-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-top: 0.8rem;
+}
+
+.bot-control-row .zone-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    width: 100%;
+}
+
+.bot-control-row .zone-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+}
+
+.bot-control-row .zone-row.border-top {
+    border-top: 1px dashed rgba(203, 178, 156, 0.2);
+    padding-top: 0.4rem;
+}
+
+.bot-control-row .zone-val {
+    font-size: 0.85rem;
+    font-weight: bold;
+}
+
+.bot-control-row .zone-val.danger {
+    color: var(--color-danger);
+}
+
+.bot-control-row .zone-val.success {
+    color: var(--color-success);
+}
+
 /* Responsive */
 @media (max-width: 1200px) {
     .bot-layout {
@@ -1196,8 +1236,92 @@ body {
     }
 }
 
+@media (max-width: 768px) {
+    .bot-controls-grid {
+        grid-template-columns: 1fr;
+        gap: 0.6rem;
+    }
+}
+
 @media (max-width: 600px) {
     .bot-info-grid {
         grid-template-columns: 1fr;
     }
 }
+
+/* Chart Zone Bar Overlay */
+.bot-chart-wrapper {
+    position: relative;
+    width: 100%;
+}
+
+.chart-zone-bar {
+    position: absolute;
+    right: 25px; /* Aligns inside the right margin of Plotly (15px margin + 10px spacing) */
+    top: 22px; /* 15px Plotly top margin + 6px container padding + 1px border */
+    height: 243px; /* Exact height of Plotly plot area: 318px height - 15px top margin - 60px bottom margin */
+    width: 8px;
+    background: rgba(203, 178, 156, 0.08);
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    z-index: 10;
+    pointer-events: none;
+    border: 1px solid rgba(203, 178, 156, 0.15);
+    overflow: visible;
+}
+
+.chart-zone-bar .zone-segment {
+    width: 100%;
+    transition: opacity 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
+    opacity: 0; /* Hidden when not active / not in focus */
+}
+
+.chart-zone-bar .zone-segment.sell-zone {
+    height: 50%;
+    background: var(--color-danger);
+    border-top-left-radius: 3px;
+    border-top-right-radius: 3px;
+}
+
+.chart-zone-bar .zone-segment.sell-zone.active {
+    opacity: 1;
+    box-shadow: 0 0 10px rgba(239, 83, 80, 0.8);
+}
+
+.chart-zone-bar .zone-segment.buy-zone {
+    height: 50%;
+    background: var(--color-success);
+    border-bottom-left-radius: 3px;
+    border-bottom-right-radius: 3px;
+}
+
+.chart-zone-bar .zone-segment.buy-zone.active {
+    opacity: 1;
+    box-shadow: 0 0 10px rgba(102, 187, 106, 0.8);
+}
+
+.chart-zone-bar .zone-pointer {
+    position: absolute;
+    left: -4px;
+    width: 16px;
+    height: 4px;
+    background: var(--coffee-cream);
+    border: 1px solid var(--coffee-dark);
+    border-radius: 2px;
+    box-shadow: 0 0 4px rgba(0, 0, 0, 0.6);
+    transition: bottom 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+    transform: translateY(2px); /* Center vertically on the relative pointer line position */
+    bottom: 0%; /* Dynamic position set in JS */
+}
+
+.chart-zone-bar .zone-pointer.danger {
+    background-color: var(--color-danger);
+    box-shadow: 0 0 6px var(--color-danger);
+}
+
+.chart-zone-bar .zone-pointer.success {
+    background-color: var(--color-success);
+    box-shadow: 0 0 6px var(--color-success);
+}
+

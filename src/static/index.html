@@ -250,7 +250,14 @@
                 <!-- BOT tab -->
                 <div id="bot-tab" class="tab-content hidden">
                     <div class="bot-column bot-column-center">
-                        <div id="metrics-history-chart" class="bot-chart-container"></div>
+                        <div class="bot-chart-wrapper">
+                            <div id="metrics-history-chart" class="bot-chart-container"></div>
+                            <div id="chart-zone-bar" class="chart-zone-bar">
+                                <div id="chart-sell-zone" class="zone-segment sell-zone"></div>
+                                <div id="chart-buy-zone" class="zone-segment buy-zone"></div>
+                                <div id="chart-zone-pointer" class="zone-pointer"></div>
+                            </div>
+                        </div>
                         
                         <!-- Info Panel: 4 Cards -->
                         <div class="bot-info-grid">
@@ -271,11 +278,24 @@
                                 <div id="bot-unrealized-pnl" class="card-value">$-.--</div>
                             </div>
                         </div>
-
-                        <!-- Window Size Control Row -->
-                        <div class="bot-control-row">
-                            <span class="control-label">Кількість тіків історії для розрахунку:</span>
-                            <input id="metrics-history-size" type="number" min="2" max="10000" value="1500" class="bot-control-input">
+                        <!-- Window Size Control Row & Trading Zones -->
+                        <div class="bot-controls-grid">
+                            <div class="bot-control-row" style="margin-top: 0;">
+                                <span class="control-label">Кількість тіків історії для розрахунку:</span>
+                                <input id="metrics-history-size" type="number" min="2" max="10000" value="1500" class="bot-control-input">
+                            </div>
+                            <div class="bot-control-row" style="margin-top: 0;">
+                                <div class="zone-wrapper">
+                                    <div class="zone-row">
+                                        <span class="control-label">Зона продажу:</span>
+                                        <span id="metrics-sell-zone" class="mono-val zone-val danger">$-.--</span>
+                                    </div>
+                                    <div class="zone-row border-top">
+                                        <span class="control-label">Зона купівлі:</span>
+                                        <span id="metrics-buy-zone" class="mono-val zone-val success">$-.--</span>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

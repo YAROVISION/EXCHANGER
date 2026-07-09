@@ -23,6 +23,7 @@ let state = {
             buyPrice: 0,
             trades: [],
             priceHistory: [],
+            fullHistory: [],
             averageHistory: [],
             val87History: [],
             val75History: [],
@@ -38,6 +39,7 @@ let state = {
             buyPrice: 0,
             trades: [],
             priceHistory: [],
+            fullHistory: [],
             averageHistory: [],
             val87History: [],
             val75History: [],
@@ -471,6 +473,14 @@ async function updatePricesAndTriggers() {
                 s.priceHistory.shift();
             }
             
+            if (!s.fullHistory) {
+                s.fullHistory = [];
+            }
+            s.fullHistory.push(currentPrice);
+            while (s.fullHistory.length > 17280) {
+                s.fullHistory.shift();
+            }
+            
             // Calculate current average, 75%, 13%, etc., and append to histories
             const sum = s.priceHistory.reduce((a, b) => a + b, 0);
             const avg = sum / s.priceHistory.length;
@@ -852,6 +862,7 @@ async function fetchTicksHistoryFor(asset) {
             
             let s = state.botState[asset];
             s.priceHistory = loadedTicks.slice(-state.botHistoryWindowSize);
+            s.fullHistory = loadedTicks.slice(-17280);
             
             recalculateAssetMetrics(asset);
             await fetchBotState(asset); // Get the persistent server state of the bot
@@ -1075,6 +1086,11 @@ function updateBotUI() {
     const angleEl = document.getElementById('metrics-regression-angle');
     const signalEl = document.getElementById('metrics-regression-signal');
     const arrowEl = document.getElementById('regression-angle-arrow');
+    const sellZoneEl = document.getElementById('metrics-sell-zone');
+    const buyZoneEl = document.getElementById('metrics-buy-zone');
+    const chartSellZone = document.getElementById('chart-sell-zone');
+    const chartBuyZone = document.getElementById('chart-buy-zone');
+    const chartZonePointer = document.getElementById('chart-zone-pointer');
     
     const format = (val) => `$${val.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
     
@@ -1106,6 +1122,14 @@ function updateBotUI() {
             virtualProfitEl.innerHTML = `$100.00 USD / 0.00000000 ${asset}<br><span style="font-size:10px; color:var(--coffee-light);">Накопичення історії (0/${state.botHistoryWindowSize})</span>`;
             virtualProfitEl.style.color = 'var(--text-light)';
         }
+        if (sellZoneEl) sellZoneEl.textContent = '$-.--';
+        if (buyZoneEl) buyZoneEl.textContent = '$-.--';
+        if (chartSellZone) chartSellZone.classList.remove('active');
+        if (chartBuyZone) chartBuyZone.classList.remove('active');
+        if (chartZonePointer) {
+            chartZonePointer.style.bottom = '0%';
+            chartZonePointer.className = 'zone-pointer';
+        }
         updatePriceHistoryChart();
         return;
     }
@@ -1130,6 +1154,61 @@ function updateBotUI() {
     if (pct25DiffEl) pct25DiffEl.textContent = `25% від різниці: $${(0.25 * diff).toLocaleString(undefined, {maximumFractionDigits: 2})}`;
     if (pct13El) pct13El.textContent = format(val13);
     if (pct13DiffEl) pct13DiffEl.textContent = `13% від різниці: $${(0.13 * diff).toLocaleString(undefined, {maximumFractionDigits: 2})}`;
+    
+    // Calculate 24h metrics from fullHistory (up to 17280 ticks)
+    const history17280 = s.fullHistory || [];
+    if (history17280.length > 0) {
+        const max24h = Math.max(...history17280);
+        const min24h = Math.min(...history17280);
+        const avg24h = (max24h + min24h) / 2;
+        
+        if (sellZoneEl) {
+            sellZoneEl.textContent = `≥ ${format(avg24h)}`;
+        }
+        if (buyZoneEl) {
+            buyZoneEl.textContent = `${format(min24h)} - ${format(avg24h)}`;
+        }
+
+        // Position current price pointer and toggle visibility on the chart's zone bar
+        if (max24h > min24h) {
+            const currentPricePct = Math.max(0, Math.min(1, (currentPrice - min24h) / (max24h - min24h)));
+            if (chartZonePointer) {
+                chartZonePointer.style.bottom = `${currentPricePct * 100}%`;
+            }
+
+            // Determine active zone (Sell zone: currentPrice >= avg24h, Buy zone: currentPrice < avg24h)
+            if (currentPrice >= avg24h) {
+                if (chartSellZone) chartSellZone.classList.add('active');
+                if (chartBuyZone) chartBuyZone.classList.remove('active');
+                if (chartZonePointer) {
+                    chartZonePointer.className = 'zone-pointer danger';
+                }
+            } else {
+                if (chartSellZone) chartSellZone.classList.remove('active');
+                if (chartBuyZone) chartBuyZone.classList.add('active');
+                if (chartZonePointer) {
+                    chartZonePointer.className = 'zone-pointer success';
+                }
+            }
+        } else {
+            // Equal min and max, reset pointer
+            if (chartSellZone) chartSellZone.classList.remove('active');
+            if (chartBuyZone) chartBuyZone.classList.remove('active');
+            if (chartZonePointer) {
+                chartZonePointer.style.bottom = '50%';
+                chartZonePointer.className = 'zone-pointer';
+            }
+        }
+    } else {
+        if (sellZoneEl) sellZoneEl.textContent = '$-.--';
+        if (buyZoneEl) buyZoneEl.textContent = '$-.--';
+        if (chartSellZone) chartSellZone.classList.remove('active');
+        if (chartBuyZone) chartBuyZone.classList.remove('active');
+        if (chartZonePointer) {
+            chartZonePointer.style.bottom = '0%';
+            chartZonePointer.className = 'zone-pointer';
+        }
+    }
     
     if (angleEl && s.regressionAngle !== undefined) {
         angleEl.textContent = `${s.regressionAngle >= 0 ? '+' : ''}${s.regressionAngle.toFixed(2)}°`;
@@ -1514,6 +1593,32 @@ function updatePriceHistoryChart() {
     const yMinVal = Math.min(...allValues);
     const yMaxVal = Math.max(...allValues);
     const pad = (yMaxVal - yMinVal) * 0.05 || 10;
+    
+    // Add the 24h average line if it falls within the visible Y-axis range
+    const history17280 = s.fullHistory || [];
+    if (history17280.length > 0) {
+        const max24h = Math.max(...history17280);
+        const min24h = Math.min(...history17280);
+        const avg24h = (max24h + min24h) / 2;
+        
+        const yAxisMin = yMinVal - pad;
+        const yAxisMax = yMaxVal + pad;
+        if (avg24h >= yAxisMin && avg24h <= yAxisMax) {
+            const avg24hLine = {
+                x: [1, s.priceHistory.length],
+                y: [avg24h, avg24h],
+                mode: 'lines',
+                name: 'Середнє (доба)',
+                line: {
+                    color: '#8B5E3C', // Accent coffee color
+                    width: 1.5,
+                    dash: 'dashdot'
+                },
+                hoverinfo: 'name+y'
+            };
+            data.push(avg24hLine);
+        }
+    }
     
     const layout = {
         uirevision: state.selectedAsset, // Preserves zoom and pan state during real-time updates
