@@ -1257,7 +1257,7 @@ body {
 
 .chart-zone-bar {
     position: absolute;
-    right: 25px; /* Aligns inside the right margin of Plotly (15px margin + 10px spacing) */
+    right: 12px; /* Aligns inside the expanded right margin of Plotly */
     top: 22px; /* 15px Plotly top margin + 6px container padding + 1px border */
     height: 243px; /* Exact height of Plotly plot area: 318px height - 15px top margin - 60px bottom margin */
     width: 8px;

@@ -1676,7 +1676,7 @@ function updatePriceHistoryChart() {
     
     const layout = {
         uirevision: state.selectedAsset, // Preserves zoom and pan state during real-time updates
-        margin: { t: 15, b: 60, l: 60, r: 15 },
+        margin: { t: 15, b: 60, l: 60, r: 35 },
         height: 318,
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',

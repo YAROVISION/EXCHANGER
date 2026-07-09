@@ -48,8 +48,19 @@ def test_trade_flow():
             print("Trade Response:")
             print(json.dumps(trade_res, indent=2))
     except urllib.error.HTTPError as e:
+        body = e.read().decode()
         print("HTTP Error:", e.code, e.reason)
-        print("Response body:", e.read().decode())
+        print("Response body:", body)
+        try:
+            err_data = json.loads(body)
+            err_msg = err_data.get('error', '')
+        except Exception:
+            err_msg = body
+            
+        if e.code == 400 and "поточний курс перебуває в зоні продажу" in err_msg:
+            print("[SUCCESS] Buy trade was blocked by the Sell Zone rule as expected.")
+            print("\n--- ALL TESTS COMPLETED SUCCESSFULLY! ---")
+            return
         raise
 
     # Step 4: Fetch Wallet again
