@@ -1162,6 +1162,9 @@ function updateBotUI() {
     const chartSellZone = document.getElementById('chart-sell-zone');
     const chartBuyZone = document.getElementById('chart-buy-zone');
     const chartZonePointer = document.getElementById('chart-zone-pointer');
+    const labelMaxEl = document.getElementById('zone-label-max');
+    const labelAvgEl = document.getElementById('zone-label-avg');
+    const labelMinEl = document.getElementById('zone-label-min');
     
     const format = (val) => `$${val.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
     
@@ -1195,6 +1198,9 @@ function updateBotUI() {
         }
         if (sellZoneEl) sellZoneEl.textContent = '$-.--';
         if (buyZoneEl) buyZoneEl.textContent = '$-.--';
+        if (labelMaxEl) labelMaxEl.textContent = '$-.--';
+        if (labelAvgEl) labelAvgEl.textContent = '$-.--';
+        if (labelMinEl) labelMinEl.textContent = '$-.--';
         if (chartSellZone) chartSellZone.classList.remove('active');
         if (chartBuyZone) chartBuyZone.classList.remove('active');
         if (chartZonePointer) {
@@ -1239,6 +1245,9 @@ function updateBotUI() {
         if (buyZoneEl) {
             buyZoneEl.textContent = `${format(min24h)} - ${format(avg24h)}`;
         }
+        if (labelMaxEl) labelMaxEl.textContent = format(max24h);
+        if (labelAvgEl) labelAvgEl.textContent = format(avg24h);
+        if (labelMinEl) labelMinEl.textContent = format(min24h);
 
         // Position current price pointer and toggle visibility on the chart's zone bar
         if (max24h > min24h) {
