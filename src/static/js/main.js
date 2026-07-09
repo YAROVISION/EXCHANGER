@@ -513,8 +513,11 @@ async function updatePricesAndTriggers() {
             
             // Check if we need to reload ticks history from Supabase
             let needReload = false;
+            const nowTime = Date.now();
             if (!s.fullHistory || s.fullHistory.length === 0) {
                 needReload = true;
+            } else if (nowTime - (s.lastReloadTime || 0) > 5 * 60 * 1000) {
+                needReload = true; // Periodic reload every 5 minutes
             } else {
                 const max24h = Math.max(...s.fullHistory);
                 const min24h = Math.min(...s.fullHistory);
@@ -930,6 +933,7 @@ async function fetchTicksHistoryFor(asset) {
             let s = state.botState[asset];
             s.priceHistory = loadedTicks.slice(-state.botHistoryWindowSize);
             s.fullHistory = loadedTicks.slice(-17280);
+            s.lastReloadTime = Date.now();
             
             recalculateAssetMetrics(asset);
             await fetchBotState(asset); // Get the persistent server state of the bot
