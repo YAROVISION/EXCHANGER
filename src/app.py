@@ -788,6 +788,14 @@ def run_bot_trading_strategy_on_server(user_id, symbol, current_price, ticks_lis
     val75 = min_price + 0.75 * diff
     val25 = min_price + 0.25 * diff
     val13 = min_price + 0.13 * diff
+    
+    # Calculate 24h average for BTC buy/sell zone check
+    avg24h = None
+    if len(ticks_list) > 0:
+        max24h = max(ticks_list)
+        min24h = min(ticks_list)
+        avg24h = (max24h + min24h) / 2.0
+
     s = bg_get_bot_state(user_id, symbol)
     fee_rate = 0.001
     usd = float(s['usd_balance'])
@@ -810,27 +818,34 @@ def run_bot_trading_strategy_on_server(user_id, symbol, current_price, ticks_lis
                 trade_sub_state = 'deactivated_waiting_above_25'
                 state_changed = True
             elif current_price >= val25:
-                if usd > 0:
-                    total_cost = usd
-                    asset = total_cost / (current_price * (1.0 + fee_rate))
-                    fee = asset * current_price * fee_rate
-                    usd = 0.0
-                    trade_state = 'holding'
-                    trade_sub_state = 'waiting_75_rising'
-                    buy_price = current_price
-                    state_changed = True
-                    trade_log = {
-                        'type': 'buy',
-                        'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
-                        'amount': asset,
-                        'price': current_price,
-                        'fee': fee,
-                        'total': total_cost
-                    }
-                    bg_insert_bot_trade(user_id, symbol, trade_log)
-                else:
-                    trade_sub_state = 'waiting_below_13'
-                    state_changed = True
+                # BTC buy check: must be in buy zone (green: current_price < avg24h)
+                is_btc = (symbol == 'BTCUSDT')
+                in_buy_zone = True
+                if is_btc and avg24h is not None:
+                    in_buy_zone = (current_price < avg24h)
+
+                if in_buy_zone:
+                    if usd > 0:
+                        total_cost = usd
+                        asset = total_cost / (current_price * (1.0 + fee_rate))
+                        fee = asset * current_price * fee_rate
+                        usd = 0.0
+                        trade_state = 'holding'
+                        trade_sub_state = 'waiting_75_rising'
+                        buy_price = current_price
+                        state_changed = True
+                        trade_log = {
+                            'type': 'buy',
+                            'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+                            'amount': asset,
+                            'price': current_price,
+                            'fee': fee,
+                            'total': total_cost
+                        }
+                        bg_insert_bot_trade(user_id, symbol, trade_log)
+                    else:
+                        trade_sub_state = 'waiting_below_13'
+                        state_changed = True
     elif trade_state == 'holding':
         if trade_sub_state in ('waiting_75', 'waiting_75_rising'):
             if current_price >= val75:
@@ -845,7 +860,13 @@ def run_bot_trading_strategy_on_server(user_id, symbol, current_price, ticks_lis
                         state_changed = True
         elif trade_sub_state == 'waiting_75_falling':
             if current_price < val75:
-                if asset > 0:
+                # BTC sell check: must be in sell zone (red: current_price >= avg24h)
+                is_btc = (symbol == 'BTCUSDT')
+                in_sell_zone = True
+                if is_btc and avg24h is not None:
+                    in_sell_zone = (current_price >= avg24h)
+
+                if in_sell_zone and asset > 0:
                     estimated_revenue = asset * current_price * (1.0 - fee_rate)
                     usd = estimated_revenue
                     fee = asset * current_price * fee_rate
@@ -875,7 +896,13 @@ def run_bot_trading_strategy_on_server(user_id, symbol, current_price, ticks_lis
                         state_changed = True
         elif trade_sub_state == 'waiting_87_falling':
             if current_price < val87:
-                if asset > 0:
+                # BTC sell check: must be in sell zone (red: current_price >= avg24h)
+                is_btc = (symbol == 'BTCUSDT')
+                in_sell_zone = True
+                if is_btc and avg24h is not None:
+                    in_sell_zone = (current_price >= avg24h)
+
+                if in_sell_zone and asset > 0:
                     estimated_revenue = asset * current_price * (1.0 - fee_rate)
                     usd = estimated_revenue
                     fee = asset * current_price * fee_rate
@@ -895,7 +922,13 @@ def run_bot_trading_strategy_on_server(user_id, symbol, current_price, ticks_lis
                     state_changed = True
         elif trade_sub_state == 'waiting_breakeven':
             if current_price >= buy_price * 1.003:
-                if asset > 0:
+                # BTC sell check: must be in sell zone (red: current_price >= avg24h)
+                is_btc = (symbol == 'BTCUSDT')
+                in_sell_zone = True
+                if is_btc and avg24h is not None:
+                    in_sell_zone = (current_price >= avg24h)
+
+                if in_sell_zone and asset > 0:
                     estimated_revenue = asset * current_price * (1.0 - fee_rate)
                     usd = estimated_revenue
                     fee = asset * current_price * fee_rate

@@ -99,6 +99,12 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Start price loop polling
     setInterval(updatePricesAndTriggers, 5000);
+
+    // Align chart zone bar on resize
+    window.addEventListener('resize', () => {
+        alignChartZoneBar();
+        setTimeout(alignChartZoneBar, 100);
+    });
 });
 
 // Asset Ticker Switcher
@@ -652,7 +658,10 @@ function initTabs() {
                 setTimeout(updatePriceHistoryChart, 50);
                 setTimeout(() => {
                     const chartDiv = document.getElementById('metrics-history-chart');
-                    if (chartDiv) Plotly.Plots.resize(chartDiv);
+                    if (chartDiv) {
+                        Plotly.Plots.resize(chartDiv);
+                        alignChartZoneBar();
+                    }
                 }, 200);
             } else {
                 if (realHistorySection) realHistorySection.classList.remove('hidden');
@@ -1010,6 +1019,18 @@ function runBotTradingStrategy(asset, currentPrice) {
     
     const feeRate = 0.001; 
     
+    // Calculate 24h range buy/sell zones for BTC checks
+    const isBtc = (asset === 'BTC');
+    let inBuyZone = true;
+    let inSellZone = true;
+    if (isBtc && s.fullHistory && s.fullHistory.length > 0) {
+        const max24h = Math.max(...s.fullHistory);
+        const min24h = Math.min(...s.fullHistory);
+        const avg24h = (max24h + min24h) / 2;
+        inBuyZone = (currentPrice < avg24h);
+        inSellZone = (currentPrice >= avg24h);
+    }
+    
     if (s.tradeState === 'idle') {
         if (s.tradeSubState === 'deactivated_waiting_above_25') {
             if (currentPrice >= val25) {
@@ -1023,25 +1044,27 @@ function runBotTradingStrategy(asset, currentPrice) {
             if (currentPrice <= minPrice) {
                 s.tradeSubState = 'deactivated_waiting_above_25';
             } else if (currentPrice >= val25) {
-                if (s.usd > 0) {
-                    const totalCost = s.usd;
-                    s.asset = totalCost / (currentPrice * (1 + feeRate));
-                    const fee = s.asset * currentPrice * feeRate;
-                    s.usd = 0;
-                    s.tradeState = 'holding';
-                    s.tradeSubState = 'waiting_75_rising';
-                    s.buyPrice = currentPrice;
-                    
-                    s.trades.unshift({
-                        type: 'buy',
-                        timestamp: new Date().toISOString(),
-                        amount: s.asset,
-                        price: currentPrice,
-                        fee: fee,
-                        total: totalCost
-                    });
-                } else {
-                    s.tradeSubState = 'waiting_below_13';
+                if (inBuyZone) {
+                    if (s.usd > 0) {
+                        const totalCost = s.usd;
+                        s.asset = totalCost / (currentPrice * (1 + feeRate));
+                        const fee = s.asset * currentPrice * feeRate;
+                        s.usd = 0;
+                        s.tradeState = 'holding';
+                        s.tradeSubState = 'waiting_75_rising';
+                        s.buyPrice = currentPrice;
+                        
+                        s.trades.unshift({
+                            type: 'buy',
+                            timestamp: new Date().toISOString(),
+                            amount: s.asset,
+                            price: currentPrice,
+                            fee: fee,
+                            total: totalCost
+                        });
+                    } else {
+                        s.tradeSubState = 'waiting_below_13';
+                    }
                 }
             }
         }
@@ -1060,24 +1083,26 @@ function runBotTradingStrategy(asset, currentPrice) {
             }
         } else if (s.tradeSubState === 'waiting_75_falling') {
             if (currentPrice < val75) {
-                if (s.asset > 0) {
-                    const estimatedRevenue = s.asset * currentPrice * (1 - feeRate);
-                    s.usd = estimatedRevenue;
-                    const fee = s.asset * currentPrice * feeRate;
-                    
-                    s.trades.unshift({
-                        type: 'sell',
-                        timestamp: new Date().toISOString(),
-                        amount: s.asset,
-                        price: currentPrice,
-                        fee: fee,
-                        total: estimatedRevenue
-                    });
-                    
-                    s.asset = 0;
-                    s.tradeState = 'idle';
-                    s.tradeSubState = 'waiting_below_13';
-                    s.buyPrice = 0;
+                if (inSellZone) {
+                    if (s.asset > 0) {
+                        const estimatedRevenue = s.asset * currentPrice * (1 - feeRate);
+                        s.usd = estimatedRevenue;
+                        const fee = s.asset * currentPrice * feeRate;
+                        
+                        s.trades.unshift({
+                            type: 'sell',
+                            timestamp: new Date().toISOString(),
+                            amount: s.asset,
+                            price: currentPrice,
+                            fee: fee,
+                            total: estimatedRevenue
+                        });
+                        
+                        s.asset = 0;
+                        s.tradeState = 'idle';
+                        s.tradeSubState = 'waiting_below_13';
+                        s.buyPrice = 0;
+                    }
                 }
             } else if (currentPrice >= val87) {
                 if (s.asset > 0) {
@@ -1092,46 +1117,50 @@ function runBotTradingStrategy(asset, currentPrice) {
             }
         } else if (s.tradeSubState === 'waiting_87_falling') {
             if (currentPrice < val87) {
-                if (s.asset > 0) {
-                    const estimatedRevenue = s.asset * currentPrice * (1 - feeRate);
-                    s.usd = estimatedRevenue;
-                    const fee = s.asset * currentPrice * feeRate;
-                    
-                    s.trades.unshift({
-                        type: 'sell',
-                        timestamp: new Date().toISOString(),
-                        amount: s.asset,
-                        price: currentPrice,
-                        fee: fee,
-                        total: estimatedRevenue
-                    });
-                    
-                    s.asset = 0;
-                    s.tradeState = 'idle';
-                    s.tradeSubState = 'waiting_below_13';
-                    s.buyPrice = 0;
+                if (inSellZone) {
+                    if (s.asset > 0) {
+                        const estimatedRevenue = s.asset * currentPrice * (1 - feeRate);
+                        s.usd = estimatedRevenue;
+                        const fee = s.asset * currentPrice * feeRate;
+                        
+                        s.trades.unshift({
+                            type: 'sell',
+                            timestamp: new Date().toISOString(),
+                            amount: s.asset,
+                            price: currentPrice,
+                            fee: fee,
+                            total: estimatedRevenue
+                        });
+                        
+                        s.asset = 0;
+                        s.tradeState = 'idle';
+                        s.tradeSubState = 'waiting_below_13';
+                        s.buyPrice = 0;
+                    }
                 }
             }
         } else if (s.tradeSubState === 'waiting_breakeven') {
             if (currentPrice >= s.buyPrice * 1.003) {
-                if (s.asset > 0) {
-                    const estimatedRevenue = s.asset * currentPrice * (1 - feeRate);
-                    s.usd = estimatedRevenue;
-                    const fee = s.asset * currentPrice * feeRate;
-                    
-                    s.trades.unshift({
-                        type: 'sell',
-                        timestamp: new Date().toISOString(),
-                        amount: s.asset,
-                        price: currentPrice,
-                        fee: fee,
-                        total: estimatedRevenue
-                    });
-                    
-                    s.asset = 0;
-                    s.tradeState = 'idle';
-                    s.tradeSubState = 'waiting_below_13';
-                    s.buyPrice = 0;
+                if (inSellZone) {
+                    if (s.asset > 0) {
+                        const estimatedRevenue = s.asset * currentPrice * (1 - feeRate);
+                        s.usd = estimatedRevenue;
+                        const fee = s.asset * currentPrice * feeRate;
+                        
+                        s.trades.unshift({
+                            type: 'sell',
+                            timestamp: new Date().toISOString(),
+                            amount: s.asset,
+                            price: currentPrice,
+                            fee: fee,
+                            total: estimatedRevenue
+                        });
+                        
+                        s.asset = 0;
+                        s.tradeState = 'idle';
+                        s.tradeSubState = 'waiting_below_13';
+                        s.buyPrice = 0;
+                    }
                 }
             }
         }
@@ -1162,9 +1191,6 @@ function updateBotUI() {
     const chartSellZone = document.getElementById('chart-sell-zone');
     const chartBuyZone = document.getElementById('chart-buy-zone');
     const chartZonePointer = document.getElementById('chart-zone-pointer');
-    const labelMaxEl = document.getElementById('zone-label-max');
-    const labelAvgEl = document.getElementById('zone-label-avg');
-    const labelMinEl = document.getElementById('zone-label-min');
     
     const format = (val) => `$${val.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
     
@@ -1198,9 +1224,6 @@ function updateBotUI() {
         }
         if (sellZoneEl) sellZoneEl.textContent = '$-.--';
         if (buyZoneEl) buyZoneEl.textContent = '$-.--';
-        if (labelMaxEl) labelMaxEl.textContent = '$-.--';
-        if (labelAvgEl) labelAvgEl.textContent = '$-.--';
-        if (labelMinEl) labelMinEl.textContent = '$-.--';
         if (chartSellZone) chartSellZone.classList.remove('active');
         if (chartBuyZone) chartBuyZone.classList.remove('active');
         if (chartZonePointer) {
@@ -1245,9 +1268,6 @@ function updateBotUI() {
         if (buyZoneEl) {
             buyZoneEl.textContent = `${format(min24h)} - ${format(avg24h)}`;
         }
-        if (labelMaxEl) labelMaxEl.textContent = format(max24h);
-        if (labelAvgEl) labelAvgEl.textContent = format(avg24h);
-        if (labelMinEl) labelMinEl.textContent = format(min24h);
 
         // Position current price pointer and toggle visibility on the chart's zone bar
         if (max24h > min24h) {
@@ -1740,5 +1760,38 @@ function updatePriceHistoryChart() {
         displaylogo: false
     };
     
-    Plotly.react('metrics-history-chart', data, layout, config);
+    Plotly.react('metrics-history-chart', data, layout, config).then(() => {
+        alignChartZoneBar();
+    });
+}
+
+function alignChartZoneBar() {
+    const chartDiv = document.getElementById('metrics-history-chart');
+    const zoneBar = document.getElementById('chart-zone-bar');
+    if (!chartDiv || !zoneBar) return;
+
+    if (chartDiv.offsetWidth === 0 || chartDiv.offsetHeight === 0) {
+        return;
+    }
+
+    const plotbg = chartDiv.querySelector('.bglayer .bg') || chartDiv.querySelector('.plotbg');
+    if (!plotbg) return;
+
+    const wrapper = chartDiv.closest('.bot-chart-wrapper');
+    if (!wrapper) return;
+
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const plotbgRect = plotbg.getBoundingClientRect();
+
+    if (plotbgRect.height === 0) return;
+
+    const top = plotbgRect.top - wrapperRect.top;
+    const height = plotbgRect.height;
+    
+    zoneBar.style.top = `${top}px`;
+    zoneBar.style.height = `${height}px`;
+
+    const rightMargin = wrapperRect.right - plotbgRect.right;
+    const zoneBarRight = Math.max(0, rightMargin - 30);
+    zoneBar.style.right = `${zoneBarRight}px`;
 }
